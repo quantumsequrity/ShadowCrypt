@@ -2102,6 +2102,10 @@ pub struct Enemy {
     pub riposte_active: bool,
     /// Turns until can act again (for stun-like effects)
     pub skip_turns: u32,
+    /// Elite/Champion data - rarity and affixes
+    pub elite_data: EliteData,
+    /// Unique ID for this enemy (for champion pack tracking)
+    pub id: usize,
 }
 
 impl Enemy {

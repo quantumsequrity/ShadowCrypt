@@ -592,6 +592,126 @@ fn to_egui_color_alpha(color: Color, alpha: u8) -> egui::Color32 {
 }
 
 // ============================================================================
+// Skill Bar System
+// ============================================================================
+
+/// Get the icon character for a skill
+fn get_skill_icon(skill: Skill) -> &'static str {
+    match skill {
+        // Warrior skills
+        Skill::Berserk => "B",
+        Skill::Cleave => "C",
+        Skill::ShieldBash => "S",
+        Skill::Whirlwind => "W",
+        // Mage skills
+        Skill::Fireball => "F",
+        Skill::IceSpear => "I",
+        Skill::Lightning => "L",
+        Skill::Teleport => "T",
+        // Rogue skills
+        Skill::Backstab => "B",
+        Skill::ShadowStep => "S",
+        Skill::PoisonBlade => "P",
+        Skill::Vanish => "V",
+        // Paladin skills
+        Skill::HolyLight => "H",
+        Skill::DivineShield => "D",
+        Skill::Smite => "S",
+        Skill::Consecrate => "C",
+        // Ranger skills
+        Skill::MultiShot => "M",
+        Skill::PoisonArrow => "P",
+        Skill::TrapSet => "T",
+        Skill::EagleEye => "E",
+        // Necromancer skills
+        Skill::RaiseDead => "R",
+        Skill::LifeDrain => "L",
+        Skill::Curse => "C",
+        Skill::DarkPact => "D",
+    }
+}
+
+/// Get the color for a skill based on its type
+fn get_skill_color(skill: Skill) -> Color32 {
+    match skill {
+        // Warrior - Red/Orange
+        Skill::Berserk => Color32::from_rgb(255, 100, 100),
+        Skill::Cleave => Color32::from_rgb(255, 120, 80),
+        Skill::ShieldBash => Color32::from_rgb(180, 180, 200),
+        Skill::Whirlwind => Color32::from_rgb(255, 80, 60),
+        // Mage - Blue/Purple
+        Skill::Fireball => Color32::from_rgb(255, 140, 50),
+        Skill::IceSpear => Color32::from_rgb(100, 200, 255),
+        Skill::Lightning => Color32::from_rgb(255, 255, 100),
+        Skill::Teleport => Color32::from_rgb(180, 100, 255),
+        // Rogue - Green/Dark
+        Skill::Backstab => Color32::from_rgb(150, 100, 100),
+        Skill::ShadowStep => Color32::from_rgb(80, 80, 120),
+        Skill::PoisonBlade => Color32::from_rgb(100, 200, 100),
+        Skill::Vanish => Color32::from_rgb(100, 100, 100),
+        // Paladin - Gold/White
+        Skill::HolyLight => Color32::from_rgb(255, 255, 200),
+        Skill::DivineShield => Color32::from_rgb(200, 200, 255),
+        Skill::Smite => Color32::from_rgb(255, 220, 100),
+        Skill::Consecrate => Color32::from_rgb(255, 255, 150),
+        // Ranger - Green/Brown
+        Skill::MultiShot => Color32::from_rgb(150, 200, 100),
+        Skill::PoisonArrow => Color32::from_rgb(100, 180, 80),
+        Skill::TrapSet => Color32::from_rgb(180, 140, 100),
+        Skill::EagleEye => Color32::from_rgb(200, 180, 100),
+        // Necromancer - Purple/Dark
+        Skill::RaiseDead => Color32::from_rgb(100, 80, 120),
+        Skill::LifeDrain => Color32::from_rgb(180, 50, 180),
+        Skill::Curse => Color32::from_rgb(120, 80, 160),
+        Skill::DarkPact => Color32::from_rgb(80, 50, 100),
+    }
+}
+
+/// Get a description for the skill
+fn get_skill_description(skill: Skill) -> &'static str {
+    match skill {
+        Skill::Berserk => "Empower your attacks for 10 turns",
+        Skill::Cleave => "Hit all adjacent enemies",
+        Skill::ShieldBash => "Stun and damage nearby enemy",
+        Skill::Whirlwind => "Devastating spin attack on all adjacent foes",
+        Skill::Fireball => "AOE fire damage with burn effect",
+        Skill::IceSpear => "AOE ice damage with freeze effect",
+        Skill::Lightning => "Chain lightning strikes 3 visible enemies",
+        Skill::Teleport => "Teleport to random location",
+        Skill::Backstab => "Triple damage to nearest enemy",
+        Skill::ShadowStep => "Teleport behind visible enemy",
+        Skill::PoisonBlade => "Attack with poison effect",
+        Skill::Vanish => "Turn invisible for 10 turns",
+        Skill::HolyLight => "Heal self, bonus damage to undead",
+        Skill::DivineShield => "Block next incoming attack",
+        Skill::Smite => "Holy damage, double vs undead",
+        Skill::Consecrate => "Create a healing shrine",
+        Skill::MultiShot => "Hit up to 3 visible enemies",
+        Skill::PoisonArrow => "Ranged poison attack",
+        Skill::TrapSet => "Place a trap at your location",
+        Skill::EagleEye => "Reveal entire floor",
+        Skill::RaiseDead => "Summon a skeleton minion",
+        Skill::LifeDrain => "Steal HP from enemy",
+        Skill::Curse => "Weaken all visible enemies",
+        Skill::DarkPact => "Sacrifice HP for full mana and power",
+    }
+}
+
+/// Get cooldown duration for a skill based on its type
+fn get_max_cooldown(skill: Skill) -> u32 {
+    match skill {
+        // High power skills have longer cooldowns
+        Skill::Whirlwind | Skill::Consecrate | Skill::DarkPact => 8,
+        Skill::Teleport | Skill::Vanish | Skill::RaiseDead => 6,
+        Skill::Fireball | Skill::Lightning | Skill::IceSpear => 4,
+        Skill::HolyLight | Skill::DivineShield | Skill::LifeDrain => 5,
+        Skill::MultiShot | Skill::EagleEye => 3,
+        // Basic skills have shorter cooldowns
+        _ => 2,
+    }
+}
+
+// ============================================================================
 // Application State
 // ============================================================================
 

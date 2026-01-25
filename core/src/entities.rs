@@ -6,6 +6,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::classes::CharacterClass;
 use crate::combat::StatusEffect;
+use crate::companions::Companion;
 use crate::items::{EquipSlot, Item, ItemKind, FoodQuality};
 use crate::magic::Skill;
 
@@ -809,6 +810,8 @@ pub struct Player {
     pub skills: Vec<Skill>,
     pub active_skill: usize,
     pub minions: Vec<Enemy>,
+    /// Recruited companions that fight alongside the player
+    pub companions: Vec<Companion>,
     /// Active satiation bonus from eating quality food
     pub satiation_bonus: Option<SatiationBonus>,
     /// Cooking skill level (0-100) - affects cooking quality

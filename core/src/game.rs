@@ -1353,6 +1353,16 @@ impl GameState {
         self.spawn_items();
         self.map.compute_fov(self.player.x, self.player.y);
 
+        // Track dungeon level for quests
+        let quest_msgs = self.quest_tracker.on_dungeon_level_changed(self.dungeon_level);
+        for msg in quest_msgs {
+            self.add_message(msg, 5);
+        }
+
+        // Auto-start new quests that become available at this level
+        self.quest_tracker.auto_start_starter_quests(self.dungeon_level, self.player.level);
+        self.check_completable_quests();
+
         let theme = crate::world::DungeonTheme::from_level(self.dungeon_level);
         self.add_message(format!("Descended to {} - Level {}!", theme.name(), self.dungeon_level), 9);
 
@@ -1418,6 +1428,152 @@ impl GameState {
             AIAction::Descend => self.descend(),
             AIAction::Ascend => self.ascend(),
             AIAction::Wait => self.end_turn(),
+        }
+    }
+
+    // === Quest System Methods ===
+
+    /// Toggle quest display
+    pub fn toggle_quests(&mut self) {
+        self.show_quests = !self.show_quests;
+    }
+
+    /// Check for and notify about completable quests
+    fn check_completable_quests(&mut self) {
+        let completable = self.quest_tracker.get_completable_quests();
+        for quest_id in completable {
+            if let Some(quest) = self.quest_tracker.get_quest(quest_id) {
+                self.add_message(format!("Quest ready to complete: {}!", quest.name), 11);
+            }
+        }
+    }
+
+    /// Start a quest by ID
+    pub fn start_quest(&mut self, quest_id: QuestId) -> bool {
+        if let Some(quest) = self.quest_tracker.get_quest(quest_id).cloned() {
+            if self.quest_tracker.is_quest_available(&quest, self.dungeon_level, self.player.level) {
+                if let Some(msg) = self.quest_tracker.start_quest(quest_id) {
+                    self.add_message(msg, 5);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Complete a quest and apply rewards
+    pub fn complete_quest(&mut self, quest_id: QuestId) -> bool {
+        if let Some(rewards) = self.quest_tracker.complete_quest(quest_id) {
+            if let Some(quest) = self.quest_tracker.get_quest(quest_id) {
+                self.add_message(format!("Quest completed: {}!", quest.name), 11);
+            }
+
+            for reward in rewards {
+                self.apply_quest_reward(&reward);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Apply a quest reward to the player
+    fn apply_quest_reward(&mut self, reward: &QuestReward) {
+        match reward {
+            QuestReward::Experience(xp) => {
+                let old_level = self.player.level;
+                if self.player.gain_xp(*xp) {
+                    self.add_message(format!("Reward: +{} XP! LEVEL UP to {}!", xp, self.player.level), 11);
+                    let quest_msgs = self.quest_tracker.on_player_level_changed(self.player.level);
+                    for msg in quest_msgs {
+                        self.add_message(msg, 5);
+                    }
+                } else {
+                    self.add_message(format!("Reward: +{} XP", xp), 9);
+                }
+            }
+            QuestReward::Gold(amount) => {
+                self.player.gold += amount;
+                self.add_message(format!("Reward: +{} Gold", amount), 11);
+                let quest_msgs = self.quest_tracker.on_gold_changed(self.player.gold);
+                for msg in quest_msgs {
+                    self.add_message(msg, 5);
+                }
+            }
+            QuestReward::Item(kind, rarity) => {
+                if self.player.inventory.len() < 20 {
+                    self.player.inventory.push(Item::new(0, 0, *kind, *rarity));
+                    self.add_message(format!("Reward: {}{}", rarity.prefix(), kind.name()), rarity.color_index());
+                } else {
+                    // Drop item at player's feet if inventory is full
+                    self.items.push(Item::new(self.player.x, self.player.y, *kind, *rarity));
+                    self.add_message(format!("Reward dropped: {}{} (inventory full)", rarity.prefix(), kind.name()), rarity.color_index());
+                }
+            }
+            QuestReward::RandomItems(count, min_rarity) => {
+                for _ in 0..*count {
+                    let (kind, mut rarity) = self.random_item();
+                    // Ensure minimum rarity
+                    if rarity < *min_rarity {
+                        rarity = *min_rarity;
+                    }
+                    if self.player.inventory.len() < 20 {
+                        self.player.inventory.push(Item::new(0, 0, kind, rarity));
+                        self.add_message(format!("Reward: {}{}", rarity.prefix(), kind.name()), rarity.color_index());
+                    } else {
+                        self.items.push(Item::new(self.player.x, self.player.y, kind, rarity));
+                        self.add_message(format!("Reward dropped: {}{}", rarity.prefix(), kind.name()), rarity.color_index());
+                    }
+                }
+            }
+            QuestReward::MaxHpBonus(bonus) => {
+                self.player.max_hp += bonus;
+                self.player.hp += bonus;
+                self.add_message(format!("Reward: +{} Max HP", bonus), 3);
+            }
+            QuestReward::MaxManaBonus(bonus) => {
+                self.player.max_mana += bonus;
+                self.player.mana += bonus;
+                self.add_message(format!("Reward: +{} Max Mana", bonus), 7);
+            }
+            QuestReward::AttackBonus(bonus) => {
+                self.player.base_attack += bonus;
+                self.add_message(format!("Reward: +{} Attack", bonus), 11);
+            }
+            QuestReward::DefenseBonus(bonus) => {
+                self.player.base_defense += bonus;
+                self.add_message(format!("Reward: +{} Defense", bonus), 9);
+            }
+            QuestReward::SkillPoint(points) => {
+                self.add_message(format!("Reward: +{} Skill Point(s)", points), 13);
+                // Skill points can be implemented in a future skill tree system
+            }
+            QuestReward::Unlock(feature) => {
+                self.add_message(format!("Unlocked: {}", feature), 13);
+                // Unlocks can be implemented for special features
+            }
+        }
+    }
+
+    /// Get available quests that can be started
+    pub fn get_available_quests(&self) -> Vec<&crate::quests::Quest> {
+        self.quest_tracker.get_available_quests(self.dungeon_level, self.player.level)
+    }
+
+    /// Get active quest IDs
+    pub fn get_active_quest_ids(&self) -> Vec<QuestId> {
+        self.quest_tracker.get_active_quest_ids()
+    }
+
+    /// Get completable quest IDs
+    pub fn get_completable_quest_ids(&self) -> Vec<QuestId> {
+        self.quest_tracker.get_completable_quests()
+    }
+
+    /// Auto-complete all ready quests
+    pub fn auto_complete_quests(&mut self) {
+        let completable: Vec<QuestId> = self.quest_tracker.get_completable_quests();
+        for quest_id in completable {
+            self.complete_quest(quest_id);
         }
     }
 }

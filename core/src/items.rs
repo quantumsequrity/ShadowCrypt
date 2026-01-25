@@ -305,7 +305,7 @@ pub enum ItemKind {
     AmuletOfOrder,
     AmuletOfBalance,
 
-    // Food (8)
+    // Food - Basic (8)
     Bread,
     Meat,
     Apple,
@@ -314,6 +314,26 @@ pub enum ItemKind {
     DragonFruit,
     AncientWine,
     GoldenApple,
+
+    // Food - Raw ingredients (can be cooked)
+    RawMeat,
+    RawFish,
+    RawVegetables,
+    RawEgg,
+    Mushrooms,
+    RawPoultry,
+
+    // Food - Cooked dishes
+    CookedMeat,
+    GrilledFish,
+    Stew,
+    Omelette,
+    RoastChicken,
+    MeatPie,
+    FruitSalad,
+    HeartyStew,
+    DragonSteak,
+    FeastOfKings,
 
     // Special (10)
     Gold,
@@ -400,7 +420,11 @@ impl ItemKind {
 
             // Food
             Self::Bread | Self::Meat | Self::Apple | Self::Cheese | Self::Feast
-            | Self::DragonFruit | Self::AncientWine | Self::GoldenApple => '%',
+            | Self::DragonFruit | Self::AncientWine | Self::GoldenApple
+            | Self::RawMeat | Self::RawFish | Self::RawVegetables | Self::RawEgg
+            | Self::Mushrooms | Self::RawPoultry | Self::CookedMeat | Self::GrilledFish
+            | Self::Stew | Self::Omelette | Self::RoastChicken | Self::MeatPie
+            | Self::FruitSalad | Self::HeartyStew | Self::DragonSteak | Self::FeastOfKings => '%',
 
             // Special
             Self::Gold => '$',

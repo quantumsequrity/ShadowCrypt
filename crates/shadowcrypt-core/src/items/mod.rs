@@ -2022,29 +2022,372 @@ pub struct Item {
     pub kind: ItemKind,
     /// Rarity of the item
     pub rarity: Rarity,
+    /// Enchantments applied to this item
+    pub enchantments: Vec<Enchantment>,
+    /// If this is a unique item
+    pub unique: Option<UniqueItem>,
+    /// If identified (for unknown items)
+    pub identified: bool,
+    /// Durability (100 = full, 0 = broken)
+    pub durability: u8,
+    /// Number of times this item has been upgraded
+    pub upgrade_level: u8,
 }
 
 impl Item {
     /// Creates a new item of the given type at the specified position
     pub fn new(x: usize, y: usize, kind: ItemKind, rarity: Rarity) -> Self {
-        Self { x, y, kind, rarity }
+        Self {
+            x,
+            y,
+            kind,
+            rarity,
+            enchantments: Vec::new(),
+            unique: None,
+            identified: true,
+            durability: 100,
+            upgrade_level: 0,
+        }
     }
 
-    /// Returns the computed stats for this item based on rarity
+    /// Creates a new unique item
+    pub fn new_unique(x: usize, y: usize, unique: UniqueItem) -> Self {
+        Self {
+            x,
+            y,
+            kind: ItemKind::AncientRelic, // Placeholder, unique items use their own stats
+            rarity: Rarity::Mythic,
+            enchantments: Vec::new(),
+            unique: Some(unique),
+            identified: false, // Unique items start unidentified
+            durability: 100,
+            upgrade_level: 0,
+        }
+    }
+
+    /// Creates an item with enchantments
+    pub fn new_enchanted(x: usize, y: usize, kind: ItemKind, rarity: Rarity, enchantments: Vec<Enchantment>) -> Self {
+        Self {
+            x,
+            y,
+            kind,
+            rarity,
+            enchantments,
+            unique: None,
+            identified: true,
+            durability: 100,
+            upgrade_level: 0,
+        }
+    }
+
+    /// Returns the computed stats for this item based on rarity, enchantments, and upgrades
     pub fn stats(&self) -> (i32, i32, i32, i32) {
+        // Check if this is a unique item
+        if let Some(unique) = &self.unique {
+            let (atk, def, hp, mana) = unique.base_stats();
+            return (atk, def, hp, mana);
+        }
+
+        // Base stats with rarity multiplier
         let (atk, def, hp, mana) = self.kind.base_stats();
         let mult = self.rarity.stat_bonus();
-        (
-            (atk as f32 * mult) as i32,
-            (def as f32 * mult) as i32,
-            (hp as f32 * mult) as i32,
-            (mana as f32 * mult) as i32,
-        )
+        let mut final_atk = (atk as f32 * mult) as i32;
+        let mut final_def = (def as f32 * mult) as i32;
+        let mut final_hp = (hp as f32 * mult) as i32;
+        let mut final_mana = (mana as f32 * mult) as i32;
+
+        // Add enchantment bonuses
+        for ench in &self.enchantments {
+            let (e_atk, e_def, e_hp, e_mana) = ench.stat_bonus();
+            final_atk += e_atk;
+            final_def += e_def;
+            final_hp += e_hp;
+            final_mana += e_mana;
+        }
+
+        // Add upgrade bonuses (+5% per level)
+        let upgrade_mult = 1.0 + (self.upgrade_level as f32 * 0.05);
+        final_atk = (final_atk as f32 * upgrade_mult) as i32;
+        final_def = (final_def as f32 * upgrade_mult) as i32;
+
+        (final_atk, final_def, final_hp, final_mana)
     }
 
-    /// Returns the display name including rarity prefix
+    /// Returns the display name including rarity prefix and enchantments
     pub fn display_name(&self) -> String {
-        format!("{}{}", self.rarity.prefix(), self.kind.name())
+        // Unique items have their own names
+        if let Some(unique) = &self.unique {
+            if self.identified {
+                return unique.name().to_string();
+            } else {
+                return "Mysterious Artifact".to_string();
+            }
+        }
+
+        let mut name = format!("{}{}", self.rarity.prefix(), self.kind.name());
+
+        // Add upgrade level
+        if self.upgrade_level > 0 {
+            name = format!("{} +{}", name, self.upgrade_level);
+        }
+
+        // Add primary enchantment to name
+        if let Some(ench) = self.enchantments.first() {
+            name = format!("{} of {}", name, ench.enchant_type.name());
+        }
+
+        name
+    }
+
+    /// Add an enchantment to this item
+    pub fn add_enchantment(&mut self, enchantment: Enchantment) -> bool {
+        // Check if enchantment is valid for this item's slot
+        if let Some(slot) = self.kind.equip_slot() {
+            if !enchantment.enchant_type.valid_for_slot(slot) {
+                return false;
+            }
+        }
+
+        // Check for duplicate enchantment types (upgrade instead)
+        for existing in &mut self.enchantments {
+            if existing.enchant_type == enchantment.enchant_type {
+                if existing.level < existing.enchant_type.max_level() {
+                    existing.level = (existing.level + 1).min(existing.enchant_type.max_level());
+                    return true;
+                }
+                return false; // Already at max level
+            }
+        }
+
+        // Limit total enchantments based on rarity
+        let max_enchants = match self.rarity {
+            Rarity::Common => 1,
+            Rarity::Uncommon => 2,
+            Rarity::Rare => 3,
+            Rarity::Epic => 4,
+            Rarity::Legendary => 5,
+            Rarity::Mythic => 6,
+        };
+
+        if self.enchantments.len() >= max_enchants {
+            return false;
+        }
+
+        self.enchantments.push(enchantment);
+        true
+    }
+
+    /// Remove an enchantment from this item
+    pub fn remove_enchantment(&mut self, enchant_type: EnchantmentType) -> bool {
+        let initial_len = self.enchantments.len();
+        self.enchantments.retain(|e| e.enchant_type != enchant_type);
+        self.enchantments.len() < initial_len
+    }
+
+    /// Upgrade this item (+1 to upgrade level)
+    pub fn upgrade(&mut self) -> bool {
+        let max_upgrade = match self.rarity {
+            Rarity::Common => 3,
+            Rarity::Uncommon => 5,
+            Rarity::Rare => 7,
+            Rarity::Epic => 10,
+            Rarity::Legendary => 15,
+            Rarity::Mythic => 20,
+        };
+
+        if self.upgrade_level < max_upgrade {
+            self.upgrade_level += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Repair this item
+    pub fn repair(&mut self, amount: u8) {
+        self.durability = (self.durability + amount).min(100);
+    }
+
+    /// Damage this item's durability
+    pub fn damage(&mut self, amount: u8) {
+        self.durability = self.durability.saturating_sub(amount);
+    }
+
+    /// Check if item is broken
+    pub fn is_broken(&self) -> bool {
+        self.durability == 0
+    }
+
+    /// Returns the set this item belongs to, if any
+    pub fn item_set(&self) -> Option<ItemSet> {
+        // Check all sets to see if this item is part of one
+        let sets = [
+            ItemSet::DragonSlayer, ItemSet::TitanMight, ItemSet::BerserkerRage,
+            ItemSet::ArcaneScholar, ItemSet::ElementalMaster, ItemSet::VoidWalker,
+            ItemSet::ShadowDancer, ItemSet::AssassinsBlade, ItemSet::NightStalker,
+            ItemSet::PaladinValor, ItemSet::DeathKnight, ItemSet::PhoenixRebirth,
+            ItemSet::AncientKings, ItemSet::DemonLord, ItemSet::CelestialGuard,
+        ];
+
+        for set in sets {
+            if set.pieces().contains(&self.kind) {
+                return Some(set);
+            }
+        }
+        None
+    }
+
+    /// Get all enchantment display strings
+    pub fn enchantment_descriptions(&self) -> Vec<String> {
+        self.enchantments.iter().map(|e| e.display_name()).collect()
+    }
+
+    /// Check if this item has a specific enchantment type
+    pub fn has_enchantment(&self, enchant_type: EnchantmentType) -> bool {
+        self.enchantments.iter().any(|e| e.enchant_type == enchant_type)
+    }
+
+    /// Get the level of a specific enchantment, or 0 if not present
+    pub fn enchantment_level(&self, enchant_type: EnchantmentType) -> u8 {
+        self.enchantments
+            .iter()
+            .find(|e| e.enchant_type == enchant_type)
+            .map(|e| e.level)
+            .unwrap_or(0)
+    }
+}
+
+// ============================================================================
+// EQUIPMENT SET TRACKING
+// ============================================================================
+
+/// Tracks equipped items and calculates set bonuses
+#[derive(Clone, Debug, Default)]
+pub struct EquipmentSet {
+    equipped: HashMap<EquipSlot, Item>,
+}
+
+impl EquipmentSet {
+    /// Create a new empty equipment set
+    pub fn new() -> Self {
+        Self { equipped: HashMap::new() }
+    }
+
+    /// Equip an item, returning the previously equipped item if any
+    pub fn equip(&mut self, item: Item) -> Option<Item> {
+        if let Some(slot) = item.kind.equip_slot() {
+            self.equipped.insert(slot, item)
+        } else if item.unique.is_some() {
+            // Unique items know their slot
+            if let Some(unique) = &item.unique {
+                let slot = unique.equip_slot();
+                self.equipped.insert(slot, item)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Unequip an item from a slot
+    pub fn unequip(&mut self, slot: EquipSlot) -> Option<Item> {
+        self.equipped.remove(&slot)
+    }
+
+    /// Get item in a slot
+    pub fn get(&self, slot: EquipSlot) -> Option<&Item> {
+        self.equipped.get(&slot)
+    }
+
+    /// Calculate total stats from all equipped items
+    pub fn total_stats(&self) -> (i32, i32, i32, i32) {
+        let mut total = (0, 0, 0, 0);
+        for item in self.equipped.values() {
+            let (atk, def, hp, mana) = item.stats();
+            total.0 += atk;
+            total.1 += def;
+            total.2 += hp;
+            total.3 += mana;
+        }
+
+        // Add set bonuses
+        for bonus in self.get_active_set_bonuses() {
+            total.0 += bonus.attack;
+            total.1 += bonus.defense;
+            total.2 += bonus.hp;
+            total.3 += bonus.mana;
+        }
+
+        total
+    }
+
+    /// Get all active set bonuses
+    pub fn get_active_set_bonuses(&self) -> Vec<SetBonus> {
+        let mut bonuses = Vec::new();
+        let mut set_counts: HashMap<ItemSet, u8> = HashMap::new();
+
+        // Count pieces per set
+        for item in self.equipped.values() {
+            if let Some(set) = item.item_set() {
+                *set_counts.entry(set).or_insert(0) += 1;
+            }
+        }
+
+        // Get bonuses for each set with 2+ pieces
+        for (set, count) in set_counts {
+            if count >= 2 {
+                let bonus = set.bonus_for_pieces(count);
+                if bonus.attack != 0 || bonus.defense != 0 || bonus.hp != 0 || bonus.mana != 0 || bonus.effect.is_some() {
+                    bonuses.push(bonus);
+                }
+            }
+        }
+
+        bonuses
+    }
+
+    /// Get all active set effects
+    pub fn get_active_effects(&self) -> Vec<SetEffect> {
+        self.get_active_set_bonuses()
+            .into_iter()
+            .filter_map(|b| b.effect)
+            .collect()
+    }
+
+    /// Get all unique item effects from equipped items
+    pub fn get_unique_effects(&self) -> Vec<UniqueEffect> {
+        self.equipped
+            .values()
+            .filter_map(|item| item.unique.as_ref())
+            .map(|u| u.special_effect())
+            .collect()
+    }
+
+    /// Check if a specific set effect is active
+    pub fn has_effect(&self, effect: SetEffect) -> bool {
+        self.get_active_effects().contains(&effect)
+    }
+
+    /// Check if a specific unique effect is active
+    pub fn has_unique_effect(&self, effect: UniqueEffect) -> bool {
+        self.get_unique_effects().contains(&effect)
+    }
+
+    /// Get a summary of active sets
+    pub fn get_set_summary(&self) -> Vec<(ItemSet, u8, u8)> {
+        let mut set_counts: HashMap<ItemSet, u8> = HashMap::new();
+
+        for item in self.equipped.values() {
+            if let Some(set) = item.item_set() {
+                *set_counts.entry(set).or_insert(0) += 1;
+            }
+        }
+
+        set_counts
+            .into_iter()
+            .map(|(set, count)| (set, count, set.total_pieces()))
+            .collect()
     }
 }
 

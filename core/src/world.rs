@@ -139,6 +139,31 @@ impl Tile {
             Self::UsedHealingShrine => '.',
             Self::LuckShrine => '7',
             Self::UsedLuckShrine => '.',
+            // Special room glyphs
+            Self::VaultDoor => '+',
+            Self::VaultFloor => '.',
+            Self::GoldPile => '$',
+            Self::GemDeposit => '*',
+            Self::ArenaPillar => 'I',
+            Self::ArenaGate => '#',
+            Self::ArenaFloor => '.',
+            Self::BloodStain => '~',
+            Self::PuzzleFloor => ':',
+            Self::PuzzleTrigger => '!',
+            Self::PuzzleActivated => '_',
+            Self::PuzzleBarrier => '|',
+            Self::PuzzleBarrierOpen => '.',
+            Self::TrapFloor => '.',
+            Self::SpikeTrap => '^',
+            Self::FireTrap => 'f',
+            Self::PoisonTrap => 'p',
+            Self::ArrowTrap => '>',
+            Self::MerchantRug => ',',
+            Self::MerchantStall => '#',
+            Self::Campfire => '*',
+            Self::SupplyCrate => '=',
+            Self::WeaponRack => '/',
+            Self::PotionShelf => '!',
         }
     }
 
@@ -185,6 +210,31 @@ impl Tile {
             Self::UsedHealingShrine => 14,   // DarkMagenta
             Self::LuckShrine => 11,          // Yellow (fortune)
             Self::UsedLuckShrine => 14,      // DarkMagenta
+            // Special room colors
+            Self::VaultDoor => 11,           // Yellow (gold trim)
+            Self::VaultFloor => 12,          // DarkYellow (rich)
+            Self::GoldPile => 11,            // Yellow (gold)
+            Self::GemDeposit => 13,          // Magenta (precious)
+            Self::ArenaPillar => 3,          // Red (blood-stained)
+            Self::ArenaGate => 4,            // DarkRed (iron)
+            Self::ArenaFloor => 4,           // DarkRed (bloodied)
+            Self::BloodStain => 3,           // Red (blood)
+            Self::PuzzleFloor => 9,          // Cyan (arcane)
+            Self::PuzzleTrigger => 7,        // Blue (glowing)
+            Self::PuzzleActivated => 5,      // Green (solved)
+            Self::PuzzleBarrier => 7,        // Blue (magical)
+            Self::PuzzleBarrierOpen => 1,    // Grey (disabled)
+            Self::TrapFloor => 0,            // DarkGrey (hidden)
+            Self::SpikeTrap => 4,            // DarkRed
+            Self::FireTrap => 3,             // Red (fire)
+            Self::PoisonTrap => 5,           // Green (toxic)
+            Self::ArrowTrap => 12,           // DarkYellow (mechanism)
+            Self::MerchantRug => 4,          // DarkRed (fine rug)
+            Self::MerchantStall => 12,       // DarkYellow (wood)
+            Self::Campfire => 3,             // Red (flames)
+            Self::SupplyCrate => 12,         // DarkYellow (wood)
+            Self::WeaponRack => 2,           // White (metal)
+            Self::PotionShelf => 13,         // Magenta (magical)
         }
     }
 
