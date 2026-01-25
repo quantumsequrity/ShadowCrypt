@@ -2423,4 +2423,208 @@ mod tests {
         assert_eq!(ItemKind::PlateMail.equip_slot(), Some(EquipSlot::Armor));
         assert_eq!(ItemKind::HealthPotion.equip_slot(), None);
     }
+
+    // Enchantment tests
+    #[test]
+    fn test_enchantment_creation() {
+        let ench = Enchantment::new(EnchantmentType::Sharpness, 3);
+        assert_eq!(ench.enchant_type, EnchantmentType::Sharpness);
+        assert_eq!(ench.level, 3);
+        assert_eq!(ench.display_name(), "Sharpness III");
+    }
+
+    #[test]
+    fn test_enchantment_max_level() {
+        let ench = Enchantment::new(EnchantmentType::Sharpness, 10);
+        assert_eq!(ench.level, 5); // Max level is 5
+    }
+
+    #[test]
+    fn test_add_enchantment() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Rare);
+        let ench = Enchantment::new(EnchantmentType::Sharpness, 2);
+        assert!(item.add_enchantment(ench));
+        assert!(item.has_enchantment(EnchantmentType::Sharpness));
+        assert_eq!(item.enchantment_level(EnchantmentType::Sharpness), 2);
+    }
+
+    #[test]
+    fn test_enchantment_stat_bonus() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
+        let base_stats = item.stats();
+
+        item.add_enchantment(Enchantment::new(EnchantmentType::Sharpness, 2));
+        let enchanted_stats = item.stats();
+
+        assert!(enchanted_stats.0 > base_stats.0);
+    }
+
+    #[test]
+    fn test_enchantment_slot_validity() {
+        let mut sword = Item::new(0, 0, ItemKind::LongSword, Rarity::Rare);
+        let mut boots = Item::new(0, 0, ItemKind::LeatherBoots, Rarity::Rare);
+
+        // Sharpness should work on weapon
+        assert!(sword.add_enchantment(Enchantment::new(EnchantmentType::Sharpness, 1)));
+
+        // Sharpness should NOT work on boots
+        assert!(!boots.add_enchantment(Enchantment::new(EnchantmentType::Sharpness, 1)));
+
+        // Swiftness should work on boots
+        assert!(boots.add_enchantment(Enchantment::new(EnchantmentType::Swiftness, 1)));
+    }
+
+    // Unique item tests
+    #[test]
+    fn test_unique_item_creation() {
+        let item = Item::new_unique(0, 0, UniqueItem::Excalibur);
+        assert!(item.unique.is_some());
+        assert_eq!(item.rarity, Rarity::Mythic);
+        assert!(!item.identified);
+    }
+
+    #[test]
+    fn test_unique_item_stats() {
+        let item = Item::new_unique(0, 0, UniqueItem::Excalibur);
+        let (atk, def, hp, mana) = item.stats();
+        assert_eq!(atk, 50);
+        assert_eq!(def, 10);
+        assert_eq!(hp, 30);
+        assert_eq!(mana, 20);
+    }
+
+    #[test]
+    fn test_unique_item_display_name() {
+        let mut item = Item::new_unique(0, 0, UniqueItem::Mjolnir);
+        assert_eq!(item.display_name(), "Mysterious Artifact");
+
+        item.identified = true;
+        assert_eq!(item.display_name(), "Mjolnir");
+    }
+
+    // Set bonus tests
+    #[test]
+    fn test_item_set_membership() {
+        let item = Item::new(0, 0, ItemKind::DragonHelm, Rarity::Legendary);
+        assert_eq!(item.item_set(), Some(ItemSet::DragonSlayer));
+    }
+
+    #[test]
+    fn test_set_bonus_calculation() {
+        let mut equipment = EquipmentSet::new();
+
+        equipment.equip(Item::new(0, 0, ItemKind::DragonHelm, Rarity::Legendary));
+        equipment.equip(Item::new(0, 0, ItemKind::DragonArmor, Rarity::Legendary));
+
+        let bonuses = equipment.get_active_set_bonuses();
+        assert!(!bonuses.is_empty());
+
+        // 2-piece Dragon Slayer bonus
+        let bonus = &bonuses[0];
+        assert_eq!(bonus.attack, 5);
+        assert_eq!(bonus.defense, 5);
+        assert!(bonus.effect.is_some());
+    }
+
+    #[test]
+    fn test_set_effect_active() {
+        let mut equipment = EquipmentSet::new();
+
+        equipment.equip(Item::new(0, 0, ItemKind::DragonHelm, Rarity::Legendary));
+        equipment.equip(Item::new(0, 0, ItemKind::DragonArmor, Rarity::Legendary));
+
+        assert!(equipment.has_effect(SetEffect::DragonBane));
+    }
+
+    // Item upgrade tests
+    #[test]
+    fn test_item_upgrade() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
+        let base_stats = item.stats();
+
+        assert!(item.upgrade());
+        assert_eq!(item.upgrade_level, 1);
+
+        let upgraded_stats = item.stats();
+        assert!(upgraded_stats.0 > base_stats.0);
+    }
+
+    #[test]
+    fn test_item_durability() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
+        assert_eq!(item.durability, 100);
+        assert!(!item.is_broken());
+
+        item.damage(50);
+        assert_eq!(item.durability, 50);
+
+        item.repair(30);
+        assert_eq!(item.durability, 80);
+
+        item.damage(100);
+        assert!(item.is_broken());
+    }
+
+    // Crafting tests
+    #[test]
+    fn test_crafting_recipes_exist() {
+        let recipes = get_all_recipes();
+        assert!(!recipes.is_empty());
+
+        // Check that we have various recipe types
+        let has_item_recipe = recipes.iter().any(|r| matches!(r.result, CraftingResult::Item(_, _)));
+        let has_unique_recipe = recipes.iter().any(|r| matches!(r.result, CraftingResult::UniqueItem(_)));
+        let has_enchant_recipe = recipes.iter().any(|r| matches!(r.result, CraftingResult::Enchantment(_, _)));
+
+        assert!(has_item_recipe);
+        assert!(has_unique_recipe);
+        assert!(has_enchant_recipe);
+    }
+
+    #[test]
+    fn test_crafting_material_rarity() {
+        assert_eq!(CraftingMaterial::IronOre.rarity(), Rarity::Common);
+        assert_eq!(CraftingMaterial::MithrilOre.rarity(), Rarity::Rare);
+        assert_eq!(CraftingMaterial::PrimordialShard.rarity(), Rarity::Mythic);
+    }
+
+    // Equipment set tests
+    #[test]
+    fn test_equipment_set_equip_unequip() {
+        let mut equipment = EquipmentSet::new();
+        let sword = Item::new(0, 0, ItemKind::LongSword, Rarity::Rare);
+
+        assert!(equipment.get(EquipSlot::Weapon).is_none());
+
+        equipment.equip(sword);
+        assert!(equipment.get(EquipSlot::Weapon).is_some());
+
+        let unequipped = equipment.unequip(EquipSlot::Weapon);
+        assert!(unequipped.is_some());
+        assert!(equipment.get(EquipSlot::Weapon).is_none());
+    }
+
+    #[test]
+    fn test_equipment_total_stats() {
+        let mut equipment = EquipmentSet::new();
+
+        equipment.equip(Item::new(0, 0, ItemKind::LongSword, Rarity::Common));
+        equipment.equip(Item::new(0, 0, ItemKind::PlateMail, Rarity::Common));
+
+        let (atk, def, hp, mana) = equipment.total_stats();
+
+        // Long sword base: 8 atk, Plate mail base: 10 def
+        assert!(atk >= 8);
+        assert!(def >= 10);
+    }
+
+    #[test]
+    fn test_unique_effect_tracking() {
+        let mut equipment = EquipmentSet::new();
+        let excalibur = Item::new_unique(0, 0, UniqueItem::Excalibur);
+
+        equipment.equip(excalibur);
+
+        assert!(equipment.has_unique_effect(UniqueEffect::HolySmite));
+    }
 }

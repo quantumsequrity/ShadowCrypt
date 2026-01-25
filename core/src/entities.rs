@@ -849,6 +849,7 @@ impl Player {
             skills: Skill::for_class(class),
             active_skill: 0,
             minions: Vec::new(),
+            companions: Vec::new(),
             satiation_bonus: None,
             cooking_skill: 0,
             meals_cooked: 0,

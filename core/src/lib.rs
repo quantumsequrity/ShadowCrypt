@@ -13,7 +13,7 @@
 //! - `world` - Map, tiles, and dungeon generation
 //! - `ai` - AI decision making for auto-play
 //! - `companions` - Companion/pet system with AI, leveling, and abilities
-//! - `npcs` - NPC and dialogue system with merchants, quest givers, and healers
+//! - `challenges` - Challenge modes and gameplay modifiers (hardcore, speedrun, pacifist, cursed)
 //! - `game` - Main game state and logic
 //! - `save` - Save/load functionality
 //! - `time` - Day/night cycle system with time-based events
@@ -46,7 +46,8 @@ pub mod entities;
 pub mod world;
 pub mod ai;
 pub mod companions;
-pub mod npcs;
+pub mod challenges;
+pub mod corruption;
 pub mod game;
 pub mod save;
 pub mod quests;
@@ -67,15 +68,14 @@ pub mod prelude {
         CompanionBehavior, CompanionMorale, CompanionAction, CompanionAI,
         CompanionEncounter, MAX_COMPANIONS,
     };
-    pub use crate::npcs::{
-        NPC, NPCKind, NPCId, NPCManager,
-        DialogueTree, DialogueNode, DialogueChoice, DialogueAction, DialogueCondition,
-        Quest, QuestId, QuestObjective,
-        ShopItem, BuffType,
+    pub use crate::challenges::{
+        ChallengeMode, ChallengeConfig, ChallengeState, ChallengeEvent,
+        GameModifiers, CurseType, ActiveCurse, ChallengeSummary,
+        HardcoreData, SpeedrunData, PacifistData,
     };
     pub use crate::game::{GameState, GameMessage};
     pub use crate::save::{save_game, load_game, save_exists, delete_save};
-    pub use crate::quests::{Quest as QuestNew, QuestTracker, QuestReward, QuestCategory, QuestState, ObjectiveType};
+    pub use crate::quests::{Quest, QuestTracker, QuestReward, QuestCategory, QuestState, ObjectiveType};
     pub use crate::time::{
         TimeSystem, TimePhase, TimeEvent, TimeModifiers, TimeEffect,
         CreatureActivity, MINUTES_PER_TURN, MINUTES_PER_DAY,
@@ -97,12 +97,11 @@ pub use companions::{
     CompanionBehavior, CompanionMorale, CompanionAction, CompanionAI,
     CompanionEncounter, MAX_COMPANIONS,
 };
-pub use npcs::{
-    NPC, NPCKind, NPCId, NPCManager,
-    DialogueTree, DialogueNode, DialogueChoice, DialogueAction, DialogueCondition,
-    ShopItem, BuffType,
+pub use challenges::{
+    ChallengeMode, ChallengeConfig, ChallengeState, ChallengeEvent,
+    GameModifiers, CurseType, ActiveCurse, ChallengeSummary,
 };
-pub use quests::{Quest as QuestNew, QuestTracker, QuestReward, QuestCategory, QuestState, ObjectiveType};
+pub use quests::{Quest, QuestTracker, QuestReward, QuestCategory, QuestState, ObjectiveType};
 pub use time::{
     TimeSystem, TimePhase, TimeEvent, TimeModifiers, TimeEffect,
     CreatureActivity, MINUTES_PER_TURN, MINUTES_PER_DAY,

@@ -265,6 +265,44 @@ impl Tile {
                 | Self::UsedSacrificeShrine
                 | Self::UsedHealingShrine
                 | Self::UsedLuckShrine
+                // Special room walkable tiles
+                | Self::VaultFloor
+                | Self::ArenaFloor
+                | Self::BloodStain
+                | Self::PuzzleFloor
+                | Self::PuzzleTrigger
+                | Self::PuzzleActivated
+                | Self::PuzzleBarrierOpen
+                | Self::TrapFloor
+                | Self::SpikeTrap
+                | Self::FireTrap
+                | Self::PoisonTrap
+                | Self::ArrowTrap
+                | Self::MerchantRug
+                | Self::Campfire
+        )
+    }
+
+    /// Returns whether this tile is a special room trap
+    pub fn is_special_trap(&self) -> bool {
+        matches!(
+            self,
+            Self::SpikeTrap | Self::FireTrap | Self::PoisonTrap | Self::ArrowTrap
+        )
+    }
+
+    /// Returns whether this tile is interactive in a special room
+    pub fn is_interactive(&self) -> bool {
+        matches!(
+            self,
+            Self::GoldPile
+                | Self::GemDeposit
+                | Self::PuzzleTrigger
+                | Self::Campfire
+                | Self::SupplyCrate
+                | Self::WeaponRack
+                | Self::PotionShelf
+                | Self::Chest
         )
     }
 
@@ -324,7 +362,29 @@ impl Tile {
 
     /// Returns whether this tile blocks line of sight
     pub fn blocks_sight(&self) -> bool {
-        matches!(self, Self::Wall | Self::Door | Self::Pillar)
+        matches!(
+            self,
+            Self::Wall
+                | Self::Door
+                | Self::Pillar
+                | Self::VaultDoor
+                | Self::ArenaGate
+                | Self::ArenaPillar
+                | Self::PuzzleBarrier
+                | Self::MerchantStall
+        )
+    }
+
+    /// Returns the trap damage type if this tile is a trap
+    pub fn trap_damage_type(&self) -> Option<&'static str> {
+        match self {
+            Self::Trap => Some("physical"),
+            Self::SpikeTrap => Some("piercing"),
+            Self::FireTrap => Some("fire"),
+            Self::PoisonTrap => Some("poison"),
+            Self::ArrowTrap => Some("piercing"),
+            _ => None,
+        }
     }
 }
 
@@ -382,6 +442,100 @@ impl DungeonTheme {
     }
 }
 
+/// Special room types with unique generation and gameplay mechanics
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+pub enum SpecialRoomType {
+    /// Standard dungeon room
+    Normal,
+    /// Treasure vault with gold, gems, and rare items - heavily guarded
+    TreasureVault,
+    /// Boss arena with pillars, gates, and space for epic battles
+    BossArena,
+    /// Puzzle room with triggers, barriers, and rewards
+    PuzzleRoom,
+    /// Trap gauntlet with dangerous obstacles and traps
+    TrapGauntlet,
+    /// Merchant camp with shops, campfire, and supplies
+    MerchantCamp,
+}
+
+impl SpecialRoomType {
+    /// Returns the display name of this room type
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Normal => "Room",
+            Self::TreasureVault => "Treasure Vault",
+            Self::BossArena => "Boss Arena",
+            Self::PuzzleRoom => "Puzzle Chamber",
+            Self::TrapGauntlet => "Trap Gauntlet",
+            Self::MerchantCamp => "Merchant Camp",
+        }
+    }
+
+    /// Returns whether enemies can spawn in this room type
+    pub fn allows_enemies(&self) -> bool {
+        match self {
+            Self::Normal => true,
+            Self::TreasureVault => true,  // Guarded
+            Self::BossArena => true,      // Boss spawns here
+            Self::PuzzleRoom => false,    // Safe until solved
+            Self::TrapGauntlet => false,  // Traps are the danger
+            Self::MerchantCamp => false,  // Safe zone
+        }
+    }
+
+    /// Returns the minimum size for this room type
+    pub fn min_size(&self) -> usize {
+        match self {
+            Self::Normal => MIN_ROOM_SIZE,
+            Self::TreasureVault => SPECIAL_ROOM_MIN_SIZE,
+            Self::BossArena => BOSS_ARENA_MIN_SIZE,
+            Self::PuzzleRoom => SPECIAL_ROOM_MIN_SIZE,
+            Self::TrapGauntlet => SPECIAL_ROOM_MIN_SIZE + 2,
+            Self::MerchantCamp => SPECIAL_ROOM_MIN_SIZE,
+        }
+    }
+
+    /// Returns the maximum size for this room type
+    pub fn max_size(&self) -> usize {
+        match self {
+            Self::Normal => MAX_ROOM_SIZE,
+            Self::TreasureVault => SPECIAL_ROOM_MAX_SIZE,
+            Self::BossArena => BOSS_ARENA_MAX_SIZE,
+            Self::PuzzleRoom => SPECIAL_ROOM_MAX_SIZE,
+            Self::TrapGauntlet => SPECIAL_ROOM_MAX_SIZE + 2,
+            Self::MerchantCamp => SPECIAL_ROOM_MAX_SIZE,
+        }
+    }
+
+    /// Returns the spawn weight for this room type at a given level
+    pub fn spawn_weight(&self, level: u32) -> f64 {
+        match self {
+            Self::Normal => 1.0,  // Always possible
+            Self::TreasureVault => {
+                if level >= 3 { 0.08 + (level as f64 * 0.005) } else { 0.0 }
+            }
+            Self::BossArena => {
+                if BOSS_LEVELS.contains(&level) { 1.0 } else { 0.0 }
+            }
+            Self::PuzzleRoom => {
+                if level >= 2 { 0.10 + (level as f64 * 0.003) } else { 0.0 }
+            }
+            Self::TrapGauntlet => {
+                if level >= 4 { 0.08 + (level as f64 * 0.004) } else { 0.0 }
+            }
+            Self::MerchantCamp => {
+                // More likely every 3-4 levels, rare otherwise
+                if level % 3 == 0 || level % 4 == 0 {
+                    0.25
+                } else {
+                    0.05
+                }
+            }
+        }
+    }
+}
+
 /// A room in the dungeon
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Room {
@@ -390,6 +544,12 @@ pub struct Room {
     pub width: usize,
     pub height: usize,
     pub is_boss_room: bool,
+    /// The special type of this room
+    pub room_type: SpecialRoomType,
+    /// Whether this room has been cleared/completed
+    pub cleared: bool,
+    /// Difficulty rating for this room (1-10)
+    pub difficulty: u8,
 }
 
 impl Room {

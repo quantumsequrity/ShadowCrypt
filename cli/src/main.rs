@@ -1872,15 +1872,19 @@ fn main() -> std::io::Result<()> {
 
     let mut state = GameState::new(selected_class);
     let mut movement_state = MovementState::new();
+    let mut targeting_state = TargetingState::new();
     let mut last_render = Instant::now();
 
     // Game loop - optimized for responsiveness
     loop {
-        // Render with movement state for direction indicators
+        // Update targeting list based on visible enemies
+        targeting_state.update_targets(&state);
+
+        // Render with movement and targeting state
         // Only re-render if enough time has passed or state changed
         let should_render = last_render.elapsed().as_millis() > 16; // ~60fps cap
         if should_render {
-            render_with_movement(&state, Some(&movement_state))?;
+            render_with_targeting(&state, Some(&movement_state), Some(&targeting_state))?;
             last_render = Instant::now();
         }
 
@@ -1951,8 +1955,82 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
 
-                // Check for movement keys first
+                // Handle targeting mode inputs first
+                if targeting_state.active {
+                    match code {
+                        // Cancel targeting
+                        KeyCode::Esc => {
+                            targeting_state.deactivate();
+                            continue;
+                        }
+                        // Cycle targets
+                        KeyCode::Tab if !shift_held => {
+                            targeting_state.next_target();
+                            continue;
+                        }
+                        KeyCode::Tab if shift_held => {
+                            targeting_state.prev_target();
+                            continue;
+                        }
+                        KeyCode::BackTab => {
+                            targeting_state.prev_target();
+                            continue;
+                        }
+                        // Lock target
+                        KeyCode::Char('t') | KeyCode::Char('T') => {
+                            targeting_state.toggle_lock();
+                            if targeting_state.locked {
+                                state.add_message("Target locked!".to_string(), 11);
+                            } else {
+                                state.add_message("Target unlocked.".to_string(), 8);
+                            }
+                            continue;
+                        }
+                        // Attack target
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            if let Some(target) = targeting_state.current_target() {
+                                // Check if target is adjacent
+                                let dx = target.x as i32 - state.player.x as i32;
+                                let dy = target.y as i32 - state.player.y as i32;
+                                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+                                if dist < 1.5 {
+                                    // Adjacent - attack directly
+                                    if let Some(idx) = targeting_state.current_enemy_index() {
+                                        state.attack_enemy(idx);
+                                        movement_state.stop_run();
+                                    }
+                                } else {
+                                    // Not adjacent - move towards target
+                                    state.move_player(dx.signum(), dy.signum());
+                                    movement_state.record_move(Direction {
+                                        dx: dx.signum(),
+                                        dy: dy.signum(),
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+                        // Use skill on target
+                        KeyCode::Char(' ') => {
+                            // Skills will use the targeted enemy
+                            state.use_skill();
+                            movement_state.stop_run();
+                            continue;
+                        }
+                        _ => {
+                            // Allow other keys to fall through (movement, etc.)
+                        }
+                    }
+                }
+
+                // Check for movement keys
                 if let Some(dir) = key_to_direction(code) {
+                    // Deactivate targeting on movement (unless locked)
+                    if !targeting_state.locked {
+                        targeting_state.deactivate();
+                    }
+
                     if shift_held {
                         // Start running in this direction
                         movement_state.start_run(dir);
@@ -1969,17 +2047,36 @@ fn main() -> std::io::Result<()> {
 
                 // Normal mode - non-movement actions
                 match code {
-                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
+                    KeyCode::Char('q') | KeyCode::Char('Q') => break,
+                    KeyCode::Esc if !targeting_state.active => break,
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => break,
 
                     // Wait/Rest action (5 or . without shift)
                     KeyCode::Char('5') => {
                         state.end_turn();
                         movement_state.stop_run();
+                        if !targeting_state.locked {
+                            targeting_state.deactivate();
+                        }
                     }
                     KeyCode::Char('.') if !shift_held => {
                         state.end_turn();
                         movement_state.stop_run();
+                        if !targeting_state.locked {
+                            targeting_state.deactivate();
+                        }
+                    }
+
+                    // Targeting - Tab cycles targets when not in targeting mode
+                    KeyCode::Tab if !shift_held => {
+                        targeting_state.next_target();
+                    }
+                    KeyCode::Tab if shift_held && !targeting_state.active => {
+                        // Shift+Tab cycles skills when not targeting
+                        state.cycle_skill();
+                    }
+                    KeyCode::BackTab if !targeting_state.active => {
+                        state.cycle_skill();
                     }
 
                     // Skills
@@ -1987,20 +2084,24 @@ fn main() -> std::io::Result<()> {
                         state.use_skill();
                         movement_state.stop_run();
                     }
-                    KeyCode::Tab => state.cycle_skill(),
 
                     // Stairs (> requires shift)
                     KeyCode::Char('>') => {
                         state.descend();
                         movement_state.stop_run();
+                        targeting_state.deactivate();
                     }
                     KeyCode::Char('<') => {
                         state.ascend();
                         movement_state.stop_run();
+                        targeting_state.deactivate();
                     }
 
                     // Inventory
-                    KeyCode::Char('i') | KeyCode::Char('I') => state.show_inventory = true,
+                    KeyCode::Char('i') | KeyCode::Char('I') => {
+                        state.show_inventory = true;
+                        targeting_state.deactivate();
+                    }
                     KeyCode::Char(c) if c.is_ascii_digit() => {
                         let idx = if c == '0' { 9 } else { (c as u8 - b'1') as usize };
                         state.use_item(idx);
@@ -2008,11 +2109,48 @@ fn main() -> std::io::Result<()> {
                     }
 
                     // Help
-                    KeyCode::Char('?') => state.show_help = true,
+                    KeyCode::Char('?') => {
+                        state.show_help = true;
+                        targeting_state.deactivate();
+                    }
 
                     // Grab/pickup explicitly (g key - common roguelike binding)
                     KeyCode::Char('g') | KeyCode::Char('G') => {
                         state.pickup_items();
+                    }
+
+                    // Target lock (outside of targeting mode - activates and locks nearest)
+                    KeyCode::Char('t') | KeyCode::Char('T') => {
+                        if !targeting_state.active {
+                            targeting_state.activate();
+                        }
+                        targeting_state.toggle_lock();
+                        if targeting_state.locked {
+                            state.add_message("Target locked!".to_string(), 11);
+                        }
+                    }
+
+                    // Fire/attack toward target (auto-target nearest if none selected)
+                    KeyCode::Char('f') | KeyCode::Char('F') => {
+                        if !targeting_state.active {
+                            targeting_state.activate();
+                        }
+                        if let Some(target) = targeting_state.current_target() {
+                            let dx = target.x as i32 - state.player.x as i32;
+                            let dy = target.y as i32 - state.player.y as i32;
+                            let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+                            if dist < 1.5 {
+                                if let Some(idx) = targeting_state.current_enemy_index() {
+                                    state.attack_enemy(idx);
+                                    movement_state.stop_run();
+                                }
+                            } else {
+                                state.add_message(format!("Target too far! Move closer to {}.", target.name), 3);
+                            }
+                        } else {
+                            state.add_message("No valid target!".to_string(), 3);
+                        }
                     }
 
                     _ => {}

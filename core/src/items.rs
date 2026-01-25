@@ -600,6 +600,26 @@ impl ItemKind {
             Self::AncientWine => "Ancient Wine",
             Self::GoldenApple => "Golden Apple",
 
+            // Raw ingredients
+            Self::RawMeat => "Raw Meat",
+            Self::RawFish => "Raw Fish",
+            Self::RawVegetables => "Raw Vegetables",
+            Self::RawEgg => "Raw Egg",
+            Self::Mushrooms => "Wild Mushrooms",
+            Self::RawPoultry => "Raw Poultry",
+
+            // Cooked dishes
+            Self::CookedMeat => "Cooked Meat",
+            Self::GrilledFish => "Grilled Fish",
+            Self::Stew => "Hearty Stew",
+            Self::Omelette => "Omelette",
+            Self::RoastChicken => "Roast Chicken",
+            Self::MeatPie => "Meat Pie",
+            Self::FruitSalad => "Fruit Salad",
+            Self::HeartyStew => "Hunter's Stew",
+            Self::DragonSteak => "Dragon Steak",
+            Self::FeastOfKings => "Feast of Kings",
+
             Self::Gold => "Gold",
             Self::Key => "Key",
             Self::Bomb => "Bomb",
@@ -817,12 +837,26 @@ impl ItemKind {
             self,
             Self::Bread | Self::Meat | Self::Apple | Self::Cheese | Self::Feast
                 | Self::DragonFruit | Self::AncientWine | Self::GoldenApple
+                | Self::RawMeat | Self::RawFish | Self::RawVegetables | Self::RawEgg
+                | Self::Mushrooms | Self::RawPoultry | Self::CookedMeat | Self::GrilledFish
+                | Self::Stew | Self::Omelette | Self::RoastChicken | Self::MeatPie
+                | Self::FruitSalad | Self::HeartyStew | Self::DragonSteak | Self::FeastOfKings
         )
     }
 
-    /// Returns the food/hunger value of this item
+    /// Returns whether this item can be cooked
+    pub fn is_cookable(&self) -> bool {
+        matches!(
+            self,
+            Self::RawMeat | Self::RawFish | Self::RawVegetables | Self::RawEgg
+                | Self::Mushrooms | Self::RawPoultry | Self::Meat
+        )
+    }
+
+    /// Returns the base food/hunger value of this item (before quality adjustment)
     pub fn food_value(&self) -> i32 {
         match self {
+            // Basic foods
             Self::Apple => 10,
             Self::Bread => 25,
             Self::Cheese => 20,
@@ -831,7 +865,83 @@ impl ItemKind {
             Self::DragonFruit => 30,
             Self::AncientWine => 35,
             Self::GoldenApple => 50,
+
+            // Raw ingredients (lower base value)
+            Self::RawMeat => 25,
+            Self::RawFish => 20,
+            Self::RawVegetables => 15,
+            Self::RawEgg => 10,
+            Self::Mushrooms => 12,
+            Self::RawPoultry => 22,
+
+            // Cooked dishes (higher base value)
+            Self::CookedMeat => 45,
+            Self::GrilledFish => 40,
+            Self::Stew => 55,
+            Self::Omelette => 35,
+            Self::RoastChicken => 50,
+            Self::MeatPie => 60,
+            Self::FruitSalad => 30,
+            Self::HeartyStew => 70,
+            Self::DragonSteak => 90,
+            Self::FeastOfKings => 150,
+
             _ => 0,
+        }
+    }
+
+    /// Returns the default food quality for this item type
+    pub fn default_food_quality(&self) -> FoodQuality {
+        match self {
+            // Raw ingredients default to Raw quality
+            Self::RawMeat | Self::RawFish | Self::RawVegetables
+            | Self::RawEgg | Self::RawPoultry => FoodQuality::Raw,
+
+            // Wild mushrooms are risky
+            Self::Mushrooms => FoodQuality::Raw,
+
+            // Basic preserved foods are Fresh
+            Self::Bread | Self::Cheese | Self::Apple | Self::Meat => FoodQuality::Fresh,
+
+            // Cooked dishes
+            Self::CookedMeat | Self::GrilledFish | Self::Omelette => FoodQuality::Cooked,
+            Self::Stew | Self::RoastChicken | Self::MeatPie | Self::FruitSalad => FoodQuality::WellCooked,
+            Self::HeartyStew => FoodQuality::WellCooked,
+
+            // Special foods
+            Self::DragonFruit | Self::AncientWine | Self::GoldenApple => FoodQuality::Gourmet,
+            Self::DragonSteak => FoodQuality::Gourmet,
+            Self::Feast | Self::FeastOfKings => FoodQuality::Legendary,
+
+            _ => FoodQuality::Fresh,
+        }
+    }
+
+    /// Returns what this food item turns into when cooked (if cookable)
+    pub fn cooked_result(&self) -> Option<ItemKind> {
+        match self {
+            Self::RawMeat | Self::Meat => Some(Self::CookedMeat),
+            Self::RawFish => Some(Self::GrilledFish),
+            Self::RawEgg => Some(Self::Omelette),
+            Self::RawPoultry => Some(Self::RoastChicken),
+            Self::RawVegetables => Some(Self::Stew),
+            Self::Mushrooms => Some(Self::Stew),
+            _ => None,
+        }
+    }
+
+    /// Check if combining two ingredients creates a special dish
+    pub fn combine_ingredients(a: ItemKind, b: ItemKind) -> Option<ItemKind> {
+        let mut ingredients = [a, b];
+        ingredients.sort_by_key(|i| *i as i32);
+
+        match ingredients {
+            [ItemKind::RawMeat, ItemKind::RawVegetables] => Some(ItemKind::HeartyStew),
+            [ItemKind::CookedMeat, ItemKind::Bread] => Some(ItemKind::MeatPie),
+            [ItemKind::Apple, ItemKind::DragonFruit] => Some(ItemKind::FruitSalad),
+            [ItemKind::RawMeat, ItemKind::DragonScale] => Some(ItemKind::DragonSteak),
+            [ItemKind::Feast, ItemKind::GoldenApple] => Some(ItemKind::FeastOfKings),
+            _ => None,
         }
     }
 }

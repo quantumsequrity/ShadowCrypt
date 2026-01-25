@@ -2108,7 +2108,15 @@ pub struct Enemy {
     pub id: usize,
 }
 
+/// Global ID counter for unique enemy identification
+static ENEMY_ID_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 impl Enemy {
+    /// Generate a unique ID for an enemy
+    fn generate_id() -> usize {
+        ENEMY_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Creates a new enemy of the given type at the specified position
     pub fn new(x: usize, y: usize, kind: EnemyKind, level: u32) -> Self {
         let (base_hp, base_atk, base_def, base_xp) = kind.base_stats();
@@ -2140,7 +2148,153 @@ impl Enemy {
             combat_stats: CombatStats::new(),
             riposte_active: false,
             skip_turns: 0,
+            elite_data: EliteData::normal(),
+            id: Self::generate_id(),
         }
+    }
+
+    /// Creates a new enemy with random rarity based on dungeon level
+    pub fn new_with_rarity(
+        x: usize,
+        y: usize,
+        kind: EnemyKind,
+        level: u32,
+        luck_bonus: f32,
+        rng: &mut impl Rng,
+    ) -> Self {
+        let rarity = MonsterRarity::roll(level, luck_bonus, rng);
+        Self::new_elite(x, y, kind, level, rarity, rng)
+    }
+
+    /// Creates a new elite/champion enemy with specific rarity
+    pub fn new_elite(
+        x: usize,
+        y: usize,
+        kind: EnemyKind,
+        level: u32,
+        rarity: MonsterRarity,
+        rng: &mut impl Rng,
+    ) -> Self {
+        let (base_hp, base_atk, base_def, base_xp) = kind.base_stats();
+        let (crit, dodge, crit_mult) = kind.combat_stats();
+
+        // Apply level scaling
+        let level_scale = 1.0 + (level as f32 * 0.1);
+
+        // Apply rarity multiplier
+        let rarity_mult = rarity.stat_multiplier();
+        let xp_mult = rarity.xp_multiplier();
+
+        let total_scale = level_scale * rarity_mult;
+
+        let hp = (base_hp as f32 * total_scale) as i32;
+
+        // Initialize ability cooldowns
+        let mut ability_cooldowns = HashMap::new();
+        for ability in kind.abilities() {
+            ability_cooldowns.insert(ability, 0);
+        }
+
+        // Create elite data with affixes
+        let elite_data = EliteData::new(rarity, rng);
+
+        // Apply affix bonuses to base stats
+        let dodge_bonus = elite_data.total_dodge_bonus();
+
+        Self {
+            x,
+            y,
+            kind,
+            hp,
+            max_hp: hp,
+            attack: (base_atk as f32 * total_scale) as i32,
+            defense: (base_def as f32 * total_scale) as i32,
+            xp_value: (base_xp as f32 * level_scale * xp_mult) as u32,
+            status_effects: HashMap::new(),
+            last_seen_player: None,
+            crit_chance: crit + 0.05 * (rarity as u8 as f32), // Elites get bonus crit
+            dodge_chance: (dodge + dodge_bonus).min(0.75),
+            crit_multiplier: crit_mult,
+            ability_cooldowns,
+            combat_stats: CombatStats::new(),
+            riposte_active: false,
+            skip_turns: 0,
+            elite_data,
+            id: Self::generate_id(),
+        }
+    }
+
+    /// Create a champion with a pack of minions
+    pub fn create_champion_pack(
+        champion_x: usize,
+        champion_y: usize,
+        kind: EnemyKind,
+        level: u32,
+        available_positions: &[(usize, usize)],
+        rng: &mut impl Rng,
+    ) -> (Self, Vec<Self>, ChampionPack) {
+        // Create the champion
+        let champion = Self::new_elite(champion_x, champion_y, kind, level, MonsterRarity::Champion, rng);
+        let champion_id = champion.id;
+
+        // Determine minion count based on level
+        let minion_count = (2 + level / 5).min(available_positions.len() as u32).min(4) as usize;
+
+        // Create minions (weaker version of the champion's type)
+        let mut minions = Vec::new();
+        let mut minion_ids = Vec::new();
+
+        for i in 0..minion_count {
+            if i < available_positions.len() {
+                let (mx, my) = available_positions[i];
+                // Minions are normal rarity
+                let mut minion = Self::new(mx, my, kind, level.saturating_sub(1));
+                // Give minions slight boost for being in a pack
+                minion.attack = (minion.attack as f32 * 1.15) as i32;
+                minion_ids.push(minion.id);
+                minions.push(minion);
+            }
+        }
+
+        // Create the pack structure
+        let pack = ChampionPack::new(champion_id, minion_ids, &champion.elite_data.affixes);
+
+        (champion, minions, pack)
+    }
+
+    /// Returns true if this enemy is elite or higher
+    pub fn is_elite(&self) -> bool {
+        !matches!(self.elite_data.rarity, MonsterRarity::Normal)
+    }
+
+    /// Returns true if this enemy is a champion
+    pub fn is_champion(&self) -> bool {
+        matches!(self.elite_data.rarity, MonsterRarity::Champion)
+    }
+
+    /// Returns true if this enemy is legendary
+    pub fn is_legendary(&self) -> bool {
+        matches!(self.elite_data.rarity, MonsterRarity::Legendary)
+    }
+
+    /// Returns the display name including rarity and affixes
+    pub fn display_name(&self) -> String {
+        self.elite_data.format_name(self.kind.name())
+    }
+
+    /// Returns the color for this enemy based on rarity
+    pub fn rarity_color(&self) -> u8 {
+        self.elite_data.rarity.color_index()
+    }
+
+    /// Check if this enemy has a specific affix
+    pub fn has_affix(&self, affix: MonsterAffix) -> bool {
+        self.elite_data.has_affix(affix)
+    }
+
+    /// Get list of all affixes
+    pub fn affixes(&self) -> &[MonsterAffix] {
+        &self.elite_data.affixes
     }
 
     /// Returns true if the enemy is still alive
@@ -2199,12 +2353,20 @@ impl Enemy {
         let mut result = AttackResult::new();
         result.base_damage = amount;
 
-        // Check for dodge
+        // Check for dodge (including elite dodge bonuses)
         if self.try_dodge(rng) {
             result.is_dodged = true;
             result.final_damage = 0;
-            result.message = format!("{} dodged the attack!", self.kind.name());
+            result.message = format!("{} dodged the attack!", self.display_name());
             self.combat_stats.attacks_dodged += 1;
+            return result;
+        }
+
+        // Check for phased state (Phasing affix)
+        if self.elite_data.is_phased && rng.gen::<f32>() < 0.5 {
+            result.is_dodged = true;
+            result.final_damage = 0;
+            result.message = format!("{} is phased and the attack passes through!", self.display_name());
             return result;
         }
 
@@ -2217,16 +2379,68 @@ impl Enemy {
             damage = (damage as f32 * 1.25) as i32;
         }
 
+        // Apply Shielded affix damage reduction
+        if self.has_affix(MonsterAffix::Shielded) {
+            damage = (damage as f32 * 0.75) as i32;
+        }
+
+        // Apply Adaptive Armor
+        damage = self.elite_data.apply_adaptive_armor(damage);
+
+        // Check Undying affix - survive with 1 HP
+        if self.elite_data.check_undying(self.hp, damage) {
+            damage = self.hp - 1;
+            result.message = format!("{}'s Undying power prevents fatal damage!", self.display_name());
+        }
+
         result.final_damage = damage;
+
+        // Notify elite data of damage taken (for Adaptive Armor)
+        self.elite_data.on_damage_taken(damage, self.max_hp);
+
+        // Update berserker state
+        let hp_after = self.hp - damage;
+        let hp_percent = hp_after as f32 / self.max_hp as f32;
+        self.elite_data.update_berserker(hp_percent);
+
         self.hp -= damage;
 
-        // Check for thorns damage reflection
+        // Check for thorns damage reflection (both status effect and affix)
         if self.has_status(StatusEffect::Thorns) {
             result.reflected_damage = (damage as f32 * 0.2) as i32;
         }
+        // Add Thorned affix reflection
+        let thorns_damage = self.elite_data.calculate_thorns_damage(damage);
+        result.reflected_damage += thorns_damage;
 
-        result.message = format!("{} takes {} damage!", self.kind.name(), damage);
+        if self.is_elite() {
+            result.message = format!("{} takes {} damage!", self.display_name(), damage);
+        } else {
+            result.message = format!("{} takes {} damage!", self.kind.name(), damage);
+        }
+
         result
+    }
+
+    /// Applies damage to the enemy with elite affix processing, returns result including affix effects
+    pub fn take_damage_with_affixes(&mut self, amount: i32, rng: &mut impl Rng) -> (AttackResult, EliteAffixResult) {
+        let attack_result = self.take_damage(amount, rng);
+        let mut affix_result = EliteAffixResult::default();
+
+        if !attack_result.is_dodged && !attack_result.is_blocked {
+            // Thorns reflection
+            affix_result.reflected_damage = attack_result.reflected_damage;
+
+            // Check if monster dies and should explode
+            if self.hp <= 0 && self.elite_data.should_explode() {
+                affix_result.trigger_explosion = true;
+                affix_result.explosion_damage = self.elite_data.explosion_damage(self.attack);
+                affix_result.explosion_radius = self.elite_data.explosion_radius();
+                affix_result.message = Some(format!("{} explodes violently!", self.display_name()));
+            }
+        }
+
+        (attack_result, affix_result)
     }
 
     /// Enemy performs an attack, returns damage and effects
@@ -2235,11 +2449,20 @@ impl Enemy {
         let base_attack = self.effective_attack();
         result.base_damage = base_attack;
 
+        // Apply elite attack modifier (includes Brutish, Berserker, Assassin first strike)
+        let hp_percent = self.hp as f32 / self.max_hp as f32;
+        let elite_attack_mod = self.elite_data.total_attack_modifier(hp_percent);
+
+        // Consume first strike if used
+        if self.elite_data.first_strike_available && self.has_affix(MonsterAffix::Assassin) {
+            self.elite_data.consume_first_strike();
+        }
+
         // Roll for critical hit
         let is_crit = self.roll_crit(rng);
         result.is_critical = is_crit;
 
-        let mut damage = base_attack;
+        let mut damage = (base_attack as f32 * elite_attack_mod) as i32;
         if is_crit {
             result.crit_multiplier = self.crit_multiplier;
             damage = (damage as f32 * self.crit_multiplier) as i32;
@@ -2250,8 +2473,12 @@ impl Enemy {
         let combo_mult = self.combat_stats.combo_multiplier();
         damage = (damage as f32 * combo_mult) as i32;
 
+        // Apply armor piercing from Armor Piercing affix
+        let armor_pierce = self.elite_data.armor_pierce_percent();
+        let effective_target_defense = (target_defense as f32 * (1.0 - armor_pierce)) as i32;
+
         // Calculate final damage
-        result.final_damage = (damage - target_defense).max(1);
+        result.final_damage = (damage - effective_target_defense).max(1);
 
         // Apply status effects based on enemy type
         if self.kind.can_poison() && rng.gen::<f32>() < 0.3 {
@@ -2267,24 +2494,96 @@ impl Enemy {
             result.applied_effects.push((StatusEffect::Bleed, 3));
         }
 
-        // Life steal for vampiric enemies
-        if self.has_status(StatusEffect::Vampiric) || matches!(self.kind, EnemyKind::Vampire | EnemyKind::VampireElite | EnemyKind::BossVampireLord | EnemyKind::Succubus | EnemyKind::Wraith) {
-            result.life_stolen = (result.final_damage as f32 * 0.2) as i32;
+        // Apply elite affix on-hit effects
+        for (effect, duration) in self.elite_data.on_hit_effects() {
+            if !result.applied_effects.iter().any(|(e, _)| *e == effect) {
+                result.applied_effects.push((effect, duration));
+            }
+        }
+
+        // Check for Cursing affix
+        if self.elite_data.roll_curse(rng) {
+            result.applied_effects.push((StatusEffect::Curse, 5));
+        }
+
+        // Life steal for vampiric enemies (both status effect and affix)
+        let base_vampiric = self.has_status(StatusEffect::Vampiric) ||
+            matches!(self.kind, EnemyKind::Vampire | EnemyKind::VampireElite |
+                    EnemyKind::BossVampireLord | EnemyKind::Succubus | EnemyKind::Wraith);
+
+        let affix_life_steal = self.elite_data.calculate_life_steal(result.final_damage);
+
+        if base_vampiric {
+            result.life_stolen = (result.final_damage as f32 * 0.2) as i32 + affix_life_steal;
+        } else {
+            result.life_stolen = affix_life_steal;
+        }
+
+        if result.life_stolen > 0 {
             self.hp = (self.hp + result.life_stolen).min(self.max_hp);
         }
 
         // Build combo message
         let combo_msg = self.combat_stats.combo_tier_name();
+        let name = self.display_name();
+
         if is_crit {
             result.message = format!("{} lands a CRITICAL HIT for {} damage! {}",
-                self.kind.name(), result.final_damage, combo_msg);
+                name, result.final_damage, combo_msg);
         } else {
             result.message = format!("{} attacks for {} damage! {}",
-                self.kind.name(), result.final_damage, combo_msg);
+                name, result.final_damage, combo_msg);
         }
 
         self.combat_stats.hit_landed();
         result
+    }
+
+    /// Enemy performs an attack with full elite affix processing
+    pub fn perform_attack_with_affixes(
+        &mut self,
+        target_defense: i32,
+        target_hp_percent: f32,
+        rng: &mut impl Rng,
+    ) -> (AttackResult, EliteAffixResult) {
+        let mut attack_result = self.perform_attack(target_defense, rng);
+        let mut affix_result = EliteAffixResult::default();
+
+        // Calculate mana drain
+        affix_result.mana_drain = self.elite_data.calculate_mana_drain(attack_result.final_damage);
+
+        // Check for knockback
+        affix_result.knockback = self.has_affix(MonsterAffix::Knockback);
+
+        // Check for Vortex pull
+        if self.has_affix(MonsterAffix::Vortex) && rng.gen::<f32>() < 0.25 {
+            affix_result.vortex_pull = true;
+            affix_result.message = Some(format!("{} pulls you closer with dark magic!", self.display_name()));
+        }
+
+        // Check for Executioner instant kill
+        if self.elite_data.check_execute(target_hp_percent) {
+            attack_result.final_damage = 9999; // Instant kill damage
+            attack_result.message = format!("{} EXECUTES the weakened target!", self.display_name());
+        }
+
+        // Add elemental damage type for visual effects
+        if self.has_affix(MonsterAffix::Molten) {
+            affix_result.elemental_type = Some(ElementalDamageType::Fire);
+        } else if self.has_affix(MonsterAffix::Frozen) {
+            affix_result.elemental_type = Some(ElementalDamageType::Cold);
+        } else if self.has_affix(MonsterAffix::Electrified) {
+            affix_result.elemental_type = Some(ElementalDamageType::Lightning);
+            // Electrified can chain to nearby targets
+            affix_result.bonus_damage = (attack_result.final_damage as f32 * 0.3) as i32;
+        } else if self.has_affix(MonsterAffix::Venomous) {
+            affix_result.elemental_type = Some(ElementalDamageType::Poison);
+        }
+
+        // Copy applied effects
+        affix_result.apply_effects = attack_result.applied_effects.clone();
+
+        (attack_result, affix_result)
     }
 
     /// Selects and uses an ability

@@ -478,9 +478,19 @@ impl GameState {
         }
 
         if self.map.is_walkable(new_x, new_y) {
+            let old_room = self.get_room_at(self.player.x, self.player.y);
             self.player.x = new_x;
             self.player.y = new_y;
             self.map.compute_fov(self.player.x, self.player.y);
+
+            // Check if entered a new room
+            let new_room = self.get_room_at(new_x, new_y);
+            if new_room != old_room && new_room.is_some() {
+                let quest_msgs = self.quest_tracker.on_room_explored();
+                for msg in quest_msgs {
+                    self.add_message(msg, 5);
+                }
+            }
 
             // Check for trap
             if self.map.tiles[new_y][new_x] == Tile::Trap {
@@ -498,6 +508,18 @@ impl GameState {
             self.pickup_items();
             self.end_turn();
         }
+    }
+
+    /// Get the room index at a given position, if any
+    fn get_room_at(&self, x: usize, y: usize) -> Option<usize> {
+        for (i, room) in self.map.rooms.iter().enumerate() {
+            if x >= room.x && x < room.x + room.width
+                && y >= room.y && y < room.y + room.height
+            {
+                return Some(i);
+            }
+        }
+        None
     }
 
     /// Attack an enemy

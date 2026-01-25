@@ -747,6 +747,8 @@ struct ShadowCryptApp {
     show_settings: bool,
     /// Current settings tab
     settings_tab: SettingsTab,
+    /// Last recorded turn count for cooldown tracking
+    last_turn_count: u32,
 }
 
 impl Default for ShadowCryptApp {
@@ -964,17 +966,48 @@ impl ShadowCryptApp {
             });
         });
 
-        // Bottom panel for messages
-        egui::TopBottomPanel::bottom("messages")
+        // Bottom panel for skill bar and messages
+        egui::TopBottomPanel::bottom("bottom_panel")
             .frame(egui::Frame::default().fill(egui::Color32::from_rgb(10, 10, 15)))
-            .min_height(100.0)
+            .min_height(150.0)
             .show(ctx, |ui| {
-            ui.vertical(|ui| {
-                ui.add_space(5.0);
-                for (msg, color) in &state.messages {
-                    ui.label(egui::RichText::new(msg).color(to_egui_color(*color)));
-                }
-            });
+            // Skill bar section
+            ui.add_space(5.0);
+            egui::Frame::none()
+                .fill(Color32::from_rgb(18, 18, 28))
+                .rounding(Rounding::same(6.0))
+                .inner_margin(8.0)
+                .show(ui, |ui| {
+                    let state = self.state.as_ref().unwrap();
+                    let clicked_skill = self.render_skill_bar(ui, state);
+
+                    // Handle skill activation from click
+                    if let Some(skill_idx) = clicked_skill {
+                        if let Some(game_state) = &mut self.state {
+                            let skill = game_state.player.skills[skill_idx];
+                            game_state.player.active_skill = skill_idx;
+                            game_state.use_skill();
+
+                            // Start cooldown
+                            let max_cd = get_max_cooldown(skill);
+                            self.skill_cooldowns.insert(skill, max_cd);
+                        }
+                    }
+                });
+
+            ui.add_space(5.0);
+            ui.separator();
+
+            // Messages section
+            let state = self.state.as_ref().unwrap();
+            egui::ScrollArea::vertical()
+                .max_height(60.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for (msg, color) in &state.messages {
+                        ui.label(egui::RichText::new(msg).color(to_egui_color(*color)));
+                    }
+                });
         });
 
         // Side panel for inventory
@@ -1286,6 +1319,214 @@ impl ShadowCryptApp {
                 }
             });
         });
+    }
+
+    /// Render the graphical skill bar with icons, cooldowns, mana costs, and click activation
+    fn render_skill_bar(&mut self, ui: &mut egui::Ui, state: &GameState) -> Option<usize> {
+        let mut clicked_skill: Option<usize> = None;
+        let skill_size = 56.0;
+        let spacing = 12.0;
+
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+
+            // Skill bar label
+            ui.label(RichText::new("Skills")
+                .size(12.0)
+                .color(Color32::from_rgb(150, 150, 180)));
+            ui.add_space(8.0);
+
+            // Mana display
+            let mana_color = if state.player.mana > state.player.total_max_mana() / 3 {
+                Color32::from_rgb(100, 150, 255)
+            } else {
+                Color32::from_rgb(255, 100, 100)
+            };
+            ui.label(RichText::new(format!("MP: {}/{}", state.player.mana, state.player.total_max_mana()))
+                .size(12.0)
+                .color(mana_color));
+            ui.add_space(15.0);
+
+            // Render each skill
+            for (idx, skill) in state.player.skills.iter().enumerate() {
+                let skill = *skill;
+                let is_active = idx == state.player.active_skill;
+                let cooldown = *self.skill_cooldowns.get(&skill).unwrap_or(&0);
+                let on_cooldown = cooldown > 0;
+                let has_mana = state.player.mana >= skill.mana_cost();
+                let can_use = !on_cooldown && has_mana;
+
+                // Allocate space for the skill button
+                let (response, painter) = ui.allocate_painter(
+                    Vec2::new(skill_size, skill_size + 18.0),
+                    Sense::click(),
+                );
+                let rect = response.rect;
+                let icon_rect = egui::Rect::from_min_size(
+                    rect.min,
+                    Vec2::new(skill_size, skill_size),
+                );
+
+                // Determine colors
+                let bg_color = if can_use {
+                    get_skill_color(skill).gamma_multiply(0.35)
+                } else {
+                    Color32::from_rgb(35, 35, 45)
+                };
+
+                let border_color = if is_active {
+                    Color32::from_rgb(255, 220, 100)
+                } else if response.hovered() && can_use {
+                    Color32::from_rgb(150, 150, 200)
+                } else {
+                    Color32::from_rgb(60, 60, 80)
+                };
+
+                // Draw background
+                painter.rect_filled(icon_rect, Rounding::same(6.0), bg_color);
+
+                // Draw border
+                let border_width = if is_active { 3.0 } else { 2.0 };
+                painter.rect_stroke(icon_rect, Rounding::same(6.0), Stroke::new(border_width, border_color));
+
+                // Draw skill icon
+                let icon = get_skill_icon(skill);
+                let icon_color = if can_use {
+                    get_skill_color(skill)
+                } else {
+                    Color32::from_rgb(90, 90, 110)
+                };
+                painter.text(
+                    icon_rect.center() - Vec2::new(0.0, 4.0),
+                    egui::Align2::CENTER_CENTER,
+                    icon,
+                    FontId::proportional(26.0),
+                    icon_color,
+                );
+
+                // Draw skill number (1-4)
+                painter.text(
+                    icon_rect.left_top() + Vec2::new(6.0, 5.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}", idx + 1),
+                    FontId::proportional(11.0),
+                    Color32::from_rgb(180, 180, 200),
+                );
+
+                // Draw cooldown overlay if on cooldown
+                if on_cooldown {
+                    let max_cd = get_max_cooldown(skill) as f32;
+                    let cooldown_percent = cooldown as f32 / max_cd;
+                    let overlay_height = icon_rect.height() * cooldown_percent;
+                    let overlay_rect = egui::Rect::from_min_max(
+                        icon_rect.left_bottom() - Vec2::new(0.0, overlay_height),
+                        icon_rect.right_bottom(),
+                    );
+                    painter.rect_filled(
+                        overlay_rect,
+                        Rounding::same(6.0),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                    );
+
+                    // Draw cooldown number
+                    painter.text(
+                        icon_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        format!("{}", cooldown),
+                        FontId::proportional(22.0),
+                        Color32::WHITE,
+                    );
+                }
+
+                // Draw low mana indicator
+                if !has_mana && !on_cooldown {
+                    painter.rect_filled(
+                        icon_rect,
+                        Rounding::same(6.0),
+                        Color32::from_rgba_unmultiplied(0, 0, 100, 100),
+                    );
+                    painter.text(
+                        icon_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "LOW",
+                        FontId::proportional(12.0),
+                        Color32::from_rgb(100, 150, 255),
+                    );
+                }
+
+                // Draw mana cost
+                let mana_text = format!("{} MP", skill.mana_cost());
+                let mana_display_color = if has_mana {
+                    Color32::from_rgb(100, 150, 255)
+                } else {
+                    Color32::from_rgb(255, 100, 100)
+                };
+                painter.text(
+                    egui::pos2(icon_rect.center().x, icon_rect.bottom() + 9.0),
+                    egui::Align2::CENTER_CENTER,
+                    mana_text,
+                    FontId::proportional(10.0),
+                    mana_display_color,
+                );
+
+                // Handle click
+                if response.clicked() && can_use {
+                    clicked_skill = Some(idx);
+                }
+
+                // Track hover for tooltip
+                if response.hovered() {
+                    self.hover_skill = Some(idx);
+                }
+
+                if idx < state.player.skills.len() - 1 {
+                    ui.add_space(spacing);
+                }
+            }
+
+            ui.add_space(20.0);
+
+            // Show tooltip for hovered skill
+            if let Some(hover_idx) = self.hover_skill {
+                if hover_idx < state.player.skills.len() {
+                    let skill = state.player.skills[hover_idx];
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(35, 35, 50))
+                        .rounding(Rounding::same(4.0))
+                        .inner_margin(8.0)
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(70, 70, 90)))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(skill.name())
+                                    .size(13.0)
+                                    .color(get_skill_color(skill))
+                                    .strong());
+                                ui.label(RichText::new(format!("({} mana)", skill.mana_cost()))
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(100, 150, 255)));
+                            });
+                            ui.label(RichText::new(get_skill_description(skill))
+                                .size(11.0)
+                                .color(Color32::from_rgb(170, 170, 190)));
+
+                            let cd = *self.skill_cooldowns.get(&skill).unwrap_or(&0);
+                            if cd > 0 {
+                                ui.label(RichText::new(format!("Cooldown: {} turns", cd))
+                                    .size(10.0)
+                                    .color(Color32::from_rgb(255, 150, 100)));
+                            }
+                        });
+                }
+            }
+        });
+
+        // Reset hover if mouse leaves
+        let any_hovered = ui.input(|i| i.pointer.has_pointer());
+        if !any_hovered {
+            self.hover_skill = None;
+        }
+
+        clicked_skill
     }
 
     fn render_victory(&mut self, ctx: &egui::Context) {
