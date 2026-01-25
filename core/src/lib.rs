@@ -18,6 +18,8 @@
 //! - `save` - Save/load functionality
 //! - `time` - Day/night cycle system with time-based events
 //! - `achievements` - Achievement system and tracking
+//! - `runes` - Rune system with socketing, rune words, and crafting
+//! - `corruption` - Corruption/sanity system with visual distortions and madness effects
 //!
 //! # Example Usage
 //!
@@ -65,6 +67,7 @@ pub mod prelude {
     pub use crate::entities::{Player, Enemy, EnemyKind};
     pub use crate::world::{Map, Tile, DungeonTheme, Room};
     pub use crate::world::{MAP_WIDTH, MAP_HEIGHT, VIEW_RADIUS, MAX_DUNGEON_LEVEL, BOSS_LEVELS};
+    pub use crate::weather::{WeatherSystem, WeatherType, WeatherIntensity, WeatherCombatModifiers, DamageType};
     pub use crate::ai::{AIAction, AIDecider};
     pub use crate::companions::{
         Companion, CompanionKind, CompanionRarity, CompanionAbility,

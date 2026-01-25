@@ -743,6 +743,9 @@ impl Map {
         // Add special features
         self.add_features(rng, level);
 
+        // Generate special rooms based on level
+        self.generate_special_rooms(rng, level);
+
         // Place stairs
         if self.rooms.len() >= 2 {
             let last_room = self.rooms.last().unwrap();

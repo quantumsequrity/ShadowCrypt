@@ -784,6 +784,24 @@ impl ShadowCryptApp {
         self.lighting.set_theme(state.map.theme, state.dungeon_level);
         self.state = Some(state);
         self.app_state = AppState::Playing;
+        self.skill_cooldowns.clear();
+        self.last_turn_count = 0;
+    }
+
+    /// Activate a skill by index (0-3 for skill slots 1-4)
+    fn activate_skill_by_index(&mut self, skill_idx: usize) {
+        if let Some(state) = &mut self.state {
+            if skill_idx < state.player.skills.len() {
+                let skill = state.player.skills[skill_idx];
+                let cooldown = *self.skill_cooldowns.get(&skill).unwrap_or(&0);
+                if cooldown == 0 && state.player.mana >= skill.mana_cost() {
+                    state.player.active_skill = skill_idx;
+                    state.use_skill();
+                    let max_cd = get_max_cooldown(skill);
+                    self.skill_cooldowns.insert(skill, max_cd);
+                }
+            }
+        }
     }
 
     fn render_class_select(&mut self, ctx: &egui::Context) {
@@ -840,10 +858,10 @@ impl ShadowCryptApp {
                 ui.add_space(20.0);
                 ui.separator();
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new("Controls: Arrow keys/WASD to move, Space for skill")
+                ui.label(egui::RichText::new("Controls: Arrow keys/WASD to move, Space/F1-F4 for skills, Tab to cycle")
                     .size(12.0)
                     .color(egui::Color32::from_rgb(80, 80, 100)));
-                ui.label(egui::RichText::new(". to descend stairs, , to ascend, 1-9 for items")
+                ui.label(egui::RichText::new(". to descend stairs, , to ascend, 1-9 for items, Click skill icons to use")
                     .size(12.0)
                     .color(egui::Color32::from_rgb(80, 80, 100)));
             });

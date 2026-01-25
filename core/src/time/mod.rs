@@ -64,9 +64,9 @@ impl TimePhase {
     pub fn color_index(&self) -> u8 {
         match self {
             Self::Dawn => 11,    // Yellow/Orange
-            Self::Day => 2,     // White/Bright
-            Self::Dusk => 12,   // Dark Yellow/Orange
-            Self::Night => 7,   // Blue/Dark
+            Self::Day => 2,      // White/Bright
+            Self::Dusk => 12,    // Dark Yellow/Orange
+            Self::Night => 7,    // Blue/Dark
             Self::Midnight => 4, // Dark Red/Purple
         }
     }
@@ -213,7 +213,10 @@ impl CreatureActivity {
     pub fn is_active(&self, phase: TimePhase) -> bool {
         match self {
             Self::Diurnal => matches!(phase, TimePhase::Day | TimePhase::Dawn | TimePhase::Dusk),
-            Self::Nocturnal => matches!(phase, TimePhase::Night | TimePhase::Midnight | TimePhase::Dusk),
+            Self::Nocturnal => matches!(
+                phase,
+                TimePhase::Night | TimePhase::Midnight | TimePhase::Dusk
+            ),
             Self::Crepuscular => matches!(phase, TimePhase::Dawn | TimePhase::Dusk),
             Self::Constant => true,
             Self::PhaseLocked(locked_phase) => phase == *locked_phase,
@@ -470,7 +473,10 @@ impl TimeSystem {
                 }
                 TimePhase::Day => {
                     // Check for eclipse (rare)
-                    if self.current_day > 5 && self.should_trigger_event(0.02) && !self.eclipse_active {
+                    if self.current_day > 5
+                        && self.should_trigger_event(0.02)
+                        && !self.eclipse_active
+                    {
                         self.eclipse_active = true;
                         self.eclipse_duration = 30;
                         events.push(TimeEvent::SolarEclipse);
@@ -511,7 +517,8 @@ impl TimeSystem {
 
     /// Simple deterministic "random" for events based on day and seed
     fn should_trigger_event(&self, base_chance: f32) -> bool {
-        let hash = self.event_seed
+        let hash = self
+            .event_seed
             .wrapping_mul(self.current_day)
             .wrapping_add(self.current_minute);
         let normalized = (hash % 1000) as f32 / 1000.0;
@@ -540,8 +547,14 @@ impl TimeSystem {
         } else {
             hour
         };
-        format!("Day {} - {:02}:{:02} {} ({})",
-            self.current_day, display_hour, minute, period, self.phase.name())
+        format!(
+            "Day {} - {:02}:{:02} {} ({})",
+            self.current_day,
+            display_hour,
+            minute,
+            period,
+            self.phase.name()
+        )
     }
 
     /// Get the current modifiers based on time and active effects
@@ -739,7 +752,10 @@ mod tests {
         let nocturnal = CreatureActivity::Nocturnal;
 
         // Nocturnal creatures should be stronger at night
-        assert!(nocturnal.get_multiplier(TimePhase::Midnight) > nocturnal.get_multiplier(TimePhase::Day));
+        assert!(
+            nocturnal.get_multiplier(TimePhase::Midnight)
+                > nocturnal.get_multiplier(TimePhase::Day)
+        );
     }
 
     #[test]

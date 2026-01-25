@@ -1092,6 +1092,13 @@ impl QuestTracker {
         let mut messages = Vec::new();
         let mut failed_quests = Vec::new();
 
+        // Build a map of quest turn limits and names to avoid borrow issues
+        let quest_info: HashMap<QuestId, (u32, String)> = self
+            .quest_definitions
+            .iter()
+            .map(|q| (q.id, (q.turn_limit, q.name.clone())))
+            .collect();
+
         for (quest_id, active) in self.active_quests.iter_mut() {
             if active.state != QuestState::Active {
                 continue;
@@ -1113,11 +1120,11 @@ impl QuestTracker {
             active.update_state();
 
             // Check turn limit
-            if let Some(quest) = self.get_quest(*quest_id) {
-                if quest.turn_limit > 0 && active.turns_elapsed >= quest.turn_limit {
+            if let Some((turn_limit, quest_name)) = quest_info.get(quest_id) {
+                if *turn_limit > 0 && active.turns_elapsed >= *turn_limit {
                     if !active.all_objectives_completed() {
                         failed_quests.push(*quest_id);
-                        messages.push(format!("Quest failed: {} (time limit exceeded)", quest.name));
+                        messages.push(format!("Quest failed: {} (time limit exceeded)", quest_name));
                     }
                 }
             }

@@ -6,14 +6,13 @@ use rand::rngs::StdRng;
 use serde::{Serialize, Deserialize};
 
 use crate::classes::CharacterClass;
-use crate::combat::StatusEffect;
+use crate::combat::{StatusEffect, ElementType, ElementalResistances, calculate_elemental_damage};
 use crate::entities::{Enemy, EnemyKind, Player};
-use crate::items::{Item, ItemKind, Rarity, EquipSlot};
+use crate::items::{Item, ItemKind, Rarity};
 use crate::magic::Skill;
 use crate::world::{Map, Room, Tile, BOSS_LEVELS, MAX_DUNGEON_LEVEL, MAP_WIDTH, MAP_HEIGHT};
 use crate::ai::{AIAction, AIDecider};
 use crate::quests::{QuestTracker, QuestReward, QuestId};
-use crate::achievements::{AchievementTracker, AchievementId};
 
 /// A message with an associated color index
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -44,9 +43,7 @@ pub struct GameState {
     pub show_inventory: bool,
     pub show_help: bool,
     pub show_quests: bool,
-    pub show_achievements: bool,
     pub quest_tracker: QuestTracker,
-    pub achievement_tracker: AchievementTracker,
     #[serde(skip, default = "StdRng::from_entropy")]
     pub rng: StdRng,
 }
@@ -64,9 +61,6 @@ impl GameState {
         let mut quest_tracker = QuestTracker::new();
         quest_tracker.auto_start_starter_quests(1, 1);
 
-        let mut achievement_tracker = AchievementTracker::new();
-        achievement_tracker.reset_run();
-
         let mut state = Self {
             map,
             player,
@@ -81,9 +75,7 @@ impl GameState {
             show_inventory: false,
             show_help: false,
             show_quests: false,
-            show_achievements: false,
             quest_tracker,
-            achievement_tracker,
             rng,
         };
 
@@ -479,55 +471,39 @@ impl GameState {
             return;
         }
 
-        // Check for shrine (any type)
-        if self.map.tiles[new_y][new_x].is_shrine() {
+        // Check for shrine
+        if self.map.tiles[new_y][new_x] == Tile::Shrine {
             self.use_shrine(new_x, new_y);
             return;
         }
 
         if self.map.is_walkable(new_x, new_y) {
-            let old_room = self.get_room_at(self.player.x, self.player.y);
             self.player.x = new_x;
             self.player.y = new_y;
             self.map.compute_fov(self.player.x, self.player.y);
-
-            // Check if entered a new room
-            let new_room = self.get_room_at(new_x, new_y);
-            if new_room != old_room && new_room.is_some() {
-                let quest_msgs = self.quest_tracker.on_room_explored();
-                for msg in quest_msgs {
-                    self.add_message(msg, 5);
-                }
-            }
 
             // Check for trap
             if self.map.tiles[new_y][new_x] == Tile::Trap {
                 self.trigger_trap();
             }
 
-            // Check for lava
+            // Check for lava (fire damage)
             if self.map.tiles[new_y][new_x] == Tile::Lava {
-                let damage = 5 + self.dungeon_level as i32;
+                let base_damage = 5 + self.dungeon_level as i32;
+                let resistances = self.player.total_elemental_resistances();
+                let damage = calculate_elemental_damage(base_damage, ElementType::Fire, &resistances);
                 self.player.hp -= damage;
-                self.add_message(format!("The lava burns you for {} damage!", damage), 3);
+                if damage < base_damage {
+                    self.add_message(format!("The lava burns you for {} damage! (resisted {})", damage, base_damage - damage), 3);
+                } else {
+                    self.add_message(format!("The lava burns you for {} damage!", damage), 3);
+                }
                 self.player.add_status(StatusEffect::Burn, 3);
             }
 
             self.pickup_items();
             self.end_turn();
         }
-    }
-
-    /// Get the room index at a given position, if any
-    fn get_room_at(&self, x: usize, y: usize) -> Option<usize> {
-        for (i, room) in self.map.rooms.iter().enumerate() {
-            if x >= room.x && x < room.x + room.width
-                && y >= room.y && y < room.y + room.height
-            {
-                return Some(i);
-            }
-        }
-        None
     }
 
     /// Attack an enemy
@@ -557,20 +533,9 @@ impl GameState {
             let xp = self.enemies[idx].xp_value;
             let is_boss = self.enemies[idx].kind.is_boss();
             let enemy_kind = self.enemies[idx].kind;
-            let enemy_max_hp = self.enemies[idx].max_hp;
 
             self.add_message(format!("{} is dead! +{} XP", enemy_name, xp), 5);
             self.player.kills += 1;
-
-            // Track kill for achievements
-            let one_hit_kill = damage >= enemy_max_hp;
-            self.achievement_tracker.record_kill(enemy_kind, one_hit_kill, self.turn_count);
-            self.achievement_tracker.record_damage_dealt(damage as u32, enemy_max_hp as u32, self.turn_count);
-
-            // Check if kill was at 1 HP
-            if self.player.hp == 1 {
-                self.achievement_tracker.record_kill_at_1hp(self.turn_count);
-            }
 
             // Track kill for quests
             let quest_msgs = self.quest_tracker.on_enemy_killed(enemy_kind);
@@ -628,8 +593,14 @@ impl GameState {
                 self.add_message(format!("Spike trap! {} damage!", damage), 3);
             }
             1 => {
-                self.player.add_status(StatusEffect::Poison, 5);
-                self.add_message("Poison dart trap! You are poisoned!".to_string(), 5);
+                // Poison trap - respects poison resistance
+                let resistances = self.player.total_elemental_resistances();
+                if resistances.is_immune(ElementType::Poison) {
+                    self.add_message("Poison dart trap! Your poison resistance protects you!".to_string(), 5);
+                } else {
+                    self.player.add_status(StatusEffect::Poison, 5);
+                    self.add_message("Poison dart trap! You are poisoned!".to_string(), 5);
+                }
             }
             2 => {
                 self.teleport_player_random();
@@ -702,12 +673,6 @@ impl GameState {
     fn use_shrine(&mut self, x: usize, y: usize) {
         self.map.tiles[y][x] = Tile::UsedShrine;
 
-        // Track shrine usage for quests
-        let quest_msgs = self.quest_tracker.on_shrine_used();
-        for msg in quest_msgs {
-            self.add_message(msg, 5);
-        }
-
         let effect = self.rng.gen_range(0..6);
         match effect {
             0 => {
@@ -735,20 +700,13 @@ impl GameState {
             }
             _ => {
                 let xp = 50 * self.dungeon_level;
-                let old_level = self.player.level;
                 if self.player.gain_xp(xp) {
                     self.add_message(format!("Shrine of Experience! +{} XP! LEVEL UP!", xp), 11);
-                    // Track player level for quests
-                    let quest_msgs = self.quest_tracker.on_player_level_changed(self.player.level);
-                    for msg in quest_msgs {
-                        self.add_message(msg, 5);
-                    }
                 } else {
                     self.add_message(format!("Shrine of Experience! +{} XP!", xp), 5);
                 }
             }
         }
-        self.check_completable_quests();
         self.end_turn();
     }
 
@@ -765,16 +723,12 @@ impl GameState {
             }
         }
 
-        let mut gold_collected = false;
-        let mut items_collected: Vec<(ItemKind, Rarity)> = Vec::new();
-
         for (_, kind, rarity) in picked_up.iter().rev() {
             match kind {
                 ItemKind::Gold => {
                     let amount = self.rng.gen_range(5..=25) * (1 + self.dungeon_level / 3);
                     self.player.gold += amount;
                     self.add_message(format!("Picked up {} gold!", amount), 11);
-                    gold_collected = true;
                 }
                 ItemKind::Key => {
                     self.player.keys += 1;
@@ -786,28 +740,11 @@ impl GameState {
                         if self.player.inventory.len() < 20 {
                             self.player.inventory.push(Item::new(0, 0, *kind, *rarity));
                             self.add_message(format!("Picked up {}!", display_name), rarity.color_index());
-                            items_collected.push((*kind, *rarity));
                         } else {
                             self.add_message("Inventory full!".to_string(), 3);
                         }
                     }
                 }
-            }
-        }
-
-        // Track gold for quests
-        if gold_collected {
-            let quest_msgs = self.quest_tracker.on_gold_changed(self.player.gold);
-            for msg in quest_msgs {
-                self.add_message(msg, 5);
-            }
-        }
-
-        // Track item collection for quests
-        for (kind, rarity) in items_collected {
-            let quest_msgs = self.quest_tracker.on_item_collected(kind, rarity);
-            for msg in quest_msgs {
-                self.add_message(msg, 5);
             }
         }
 
@@ -819,8 +756,6 @@ impl GameState {
         for idx in to_remove.into_iter().rev() {
             self.items.remove(idx);
         }
-
-        self.check_completable_quests();
     }
 
     /// End the current turn
@@ -848,14 +783,6 @@ impl GameState {
             }
         }
 
-        // Track turns for quests (every 10 turns to reduce message spam)
-        if self.turn_count % 10 == 0 {
-            let quest_msgs = self.quest_tracker.on_turn(self.turn_count);
-            for msg in quest_msgs {
-                self.add_message(msg, 5);
-            }
-        }
-
         // Check death
         if self.player.hp <= 0 {
             self.game_over = true;
@@ -863,9 +790,9 @@ impl GameState {
         }
     }
 
-    /// Process enemy turns
+    /// Process enemy turns with elemental damage
     fn enemy_turn(&mut self) {
-        let mut attacks: Vec<(usize, i32, Option<StatusEffect>)> = Vec::new();
+        let mut attacks: Vec<(usize, i32, ElementType, Option<StatusEffect>)> = Vec::new();
         let mut moves: Vec<(usize, usize, usize)> = Vec::new();
 
         let player_invisible = self.player.has_status(StatusEffect::Invisibility);
@@ -915,19 +842,20 @@ impl GameState {
                         damage = (damage as f32 * 1.5) as i32;
                     }
 
-                    let status = if enemy.kind.can_poison() && self.rng.gen_bool(0.3) {
-                        Some(StatusEffect::Poison)
+                    // Determine element type and status effect based on enemy type
+                    let (element, status) = if enemy.kind.can_poison() && self.rng.gen_bool(0.3) {
+                        (ElementType::Poison, Some(StatusEffect::Poison))
                     } else if enemy.kind.can_burn() && self.rng.gen_bool(0.3) {
-                        Some(StatusEffect::Burn)
+                        (ElementType::Fire, Some(StatusEffect::Burn))
                     } else if enemy.kind.can_freeze() && self.rng.gen_bool(0.2) {
-                        Some(StatusEffect::Freeze)
+                        (ElementType::Ice, Some(StatusEffect::Freeze))
                     } else if enemy.kind.can_bleed() && self.rng.gen_bool(0.25) {
-                        Some(StatusEffect::Bleed)
+                        (ElementType::Physical, Some(StatusEffect::Bleed))
                     } else {
-                        None
+                        (ElementType::Physical, None)
                     };
 
-                    attacks.push((idx, damage, status));
+                    attacks.push((idx, damage, element, status));
                 } else if dist < 15.0 {
                     // Move towards target
                     let move_x = dx.signum();
@@ -951,8 +879,8 @@ impl GameState {
             self.enemies[idx].y = new_y;
         }
 
-        // Apply attacks
-        for (idx, damage, status) in attacks {
+        // Apply attacks with elemental resistance
+        for (idx, base_damage, element, status) in attacks {
             if !self.enemies[idx].is_alive() {
                 continue;
             }
@@ -964,13 +892,39 @@ impl GameState {
                 continue;
             }
 
+            // Apply elemental resistance to damage
+            let resistances = self.player.total_elemental_resistances();
+            let damage = calculate_elemental_damage(base_damage, element, &resistances);
+            let resistance_amount = resistances.get(element);
+
             self.player.hp -= damage;
             let enemy_name = self.enemies[idx].kind.name();
-            self.add_message(format!("{} hits you for {} damage!", enemy_name, damage), 3);
 
+            // Show resistance info if relevant
+            if element != ElementType::Physical && resistance_amount.abs() > 0.01 {
+                if damage < base_damage {
+                    self.add_message(format!("{} hits you with {} damage for {}! (resisted {})",
+                        enemy_name, element.name().to_lowercase(), damage, base_damage - damage), element.color_index());
+                } else if damage > base_damage {
+                    self.add_message(format!("{} hits you with {} damage for {}! (vulnerable!)",
+                        enemy_name, element.name().to_lowercase(), damage), element.color_index());
+                } else {
+                    self.add_message(format!("{} hits you for {} damage!", enemy_name, damage), 3);
+                }
+            } else {
+                self.add_message(format!("{} hits you for {} damage!", enemy_name, damage), 3);
+            }
+
+            // Apply status effect if not immune
             if let Some(effect) = status {
-                self.player.add_status(effect, 5);
-                self.add_message(format!("You are {}!", effect.name().to_lowercase()), effect.color_index());
+                let effect_element = effect.element_type();
+                if !resistances.is_immune(effect_element) {
+                    self.player.add_status(effect, 5);
+                    self.add_message(format!("You are {}!", effect.name().to_lowercase()), effect.color_index());
+                } else {
+                    self.add_message(format!("Your {} resistance prevents the {}!",
+                        effect_element.name().to_lowercase(), effect.name().to_lowercase()), 9);
+                }
             }
         }
 
@@ -987,12 +941,6 @@ impl GameState {
 
         let skill = self.player.skills[self.player.active_skill];
         self.player.mana -= skill.mana_cost();
-
-        // Track skill usage for quests
-        let quest_msgs = self.quest_tracker.on_skill_used();
-        for msg in quest_msgs {
-            self.add_message(msg, 5);
-        }
 
         match skill {
             Skill::Berserk => {
@@ -1035,10 +983,10 @@ impl GameState {
                 }
             }
             Skill::Fireball => {
-                self.cast_aoe_spell(StatusEffect::Burn, 20, 3, "Fireball", 3);
+                self.cast_elemental_aoe_spell(ElementType::Fire, StatusEffect::Burn, 20, 3, "Fireball");
             }
             Skill::IceSpear => {
-                self.cast_aoe_spell(StatusEffect::Freeze, 15, 2, "Ice Spear", 9);
+                self.cast_elemental_aoe_spell(ElementType::Ice, StatusEffect::Freeze, 15, 2, "Ice Spear");
             }
             Skill::Lightning => {
                 let mut targets: Vec<usize> = self.enemies.iter().enumerate()
@@ -1218,7 +1166,8 @@ impl GameState {
         self.end_turn();
     }
 
-    fn cast_aoe_spell(&mut self, effect: StatusEffect, base_damage: i32, radius: i32, name: &str, color_index: u8) {
+    /// Cast an AoE spell with elemental damage type
+    fn cast_elemental_aoe_spell(&mut self, element: ElementType, effect: StatusEffect, base_damage: i32, radius: i32, name: &str) {
         let (px, py) = (self.player.x as i32, self.player.y as i32);
         let mut hit_count = 0;
 
@@ -1234,7 +1183,7 @@ impl GameState {
             }
         }
 
-        self.add_message(format!("{}! Hit {} enemies!", name, hit_count), color_index);
+        self.add_message(format!("{}! Hit {} enemies with {} damage!", name, hit_count, element.name().to_lowercase()), element.color_index());
     }
 
     /// Teleport player to a random location
@@ -1312,19 +1261,28 @@ impl GameState {
                 self.player.add_status(StatusEffect::Regeneration, 30);
                 self.add_message("You begin regenerating!".to_string(), 13);
             }
+            ItemKind::FireResistPotion => {
+                self.player.add_temporary_resistance(ElementType::Fire, 0.5, 50);
+                self.add_message("You gain fire resistance!".to_string(), 3);
+            }
+            ItemKind::IceResistPotion => {
+                self.player.add_temporary_resistance(ElementType::Ice, 0.5, 50);
+                self.add_message("You gain ice resistance!".to_string(), 9);
+            }
             ItemKind::PoisonResistPotion => {
                 self.player.remove_status(StatusEffect::Poison);
-                self.add_message("Poison cured!".to_string(), 5);
+                self.player.add_temporary_resistance(ElementType::Poison, 0.5, 50);
+                self.add_message("Poison cured and you gain poison resistance!".to_string(), 5);
             }
             ItemKind::ScrollTeleport => {
                 self.teleport_player_random();
                 self.add_message("You teleport!".to_string(), 7);
             }
             ItemKind::ScrollFireball => {
-                self.cast_aoe_spell(StatusEffect::Burn, 30, 4, "Fireball scroll", 3);
+                self.cast_elemental_aoe_spell(ElementType::Fire, StatusEffect::Burn, 30, 4, "Fireball scroll");
             }
             ItemKind::ScrollIceStorm => {
-                self.cast_aoe_spell(StatusEffect::Freeze, 25, 5, "Ice storm scroll", 9);
+                self.cast_elemental_aoe_spell(ElementType::Ice, StatusEffect::Freeze, 25, 5, "Ice storm scroll");
             }
             ItemKind::ScrollLightning => {
                 for enemy in &mut self.enemies {
@@ -1343,7 +1301,7 @@ impl GameState {
                 self.add_message("Mass heal! Fully restored!".to_string(), 3);
             }
             ItemKind::Bomb => {
-                self.cast_aoe_spell(StatusEffect::Burn, 50, 3, "Bomb explodes", 3);
+                self.cast_elemental_aoe_spell(ElementType::Fire, StatusEffect::Burn, 50, 3, "Bomb explodes");
             }
             ItemKind::XPPotion => {
                 let xp = 100 * self.dungeon_level;
@@ -1393,16 +1351,6 @@ impl GameState {
         self.spawn_enemies();
         self.spawn_items();
         self.map.compute_fov(self.player.x, self.player.y);
-
-        // Track dungeon level for quests
-        let quest_msgs = self.quest_tracker.on_dungeon_level_changed(self.dungeon_level);
-        for msg in quest_msgs {
-            self.add_message(msg, 5);
-        }
-
-        // Auto-start new quests that become available at this level
-        self.quest_tracker.auto_start_starter_quests(self.dungeon_level, self.player.level);
-        self.check_completable_quests();
 
         let theme = crate::world::DungeonTheme::from_level(self.dungeon_level);
         self.add_message(format!("Descended to {} - Level {}!", theme.name(), self.dungeon_level), 9);
@@ -1472,150 +1420,9 @@ impl GameState {
         }
     }
 
-    // === Quest System Methods ===
-
-    /// Toggle quest display
-    pub fn toggle_quests(&mut self) {
-        self.show_quests = !self.show_quests;
-    }
-
-    /// Check for and notify about completable quests
+    /// Check and complete any ready quests
     fn check_completable_quests(&mut self) {
-        let completable = self.quest_tracker.get_completable_quests();
-        for quest_id in completable {
-            if let Some(quest) = self.quest_tracker.get_quest(quest_id) {
-                self.add_message(format!("Quest ready to complete: {}!", quest.name), 11);
-            }
-        }
-    }
-
-    /// Start a quest by ID
-    pub fn start_quest(&mut self, quest_id: QuestId) -> bool {
-        if let Some(quest) = self.quest_tracker.get_quest(quest_id).cloned() {
-            if self.quest_tracker.is_quest_available(&quest, self.dungeon_level, self.player.level) {
-                if let Some(msg) = self.quest_tracker.start_quest(quest_id) {
-                    self.add_message(msg, 5);
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Complete a quest and apply rewards
-    pub fn complete_quest(&mut self, quest_id: QuestId) -> bool {
-        if let Some(rewards) = self.quest_tracker.complete_quest(quest_id) {
-            if let Some(quest) = self.quest_tracker.get_quest(quest_id) {
-                self.add_message(format!("Quest completed: {}!", quest.name), 11);
-            }
-
-            for reward in rewards {
-                self.apply_quest_reward(&reward);
-            }
-            return true;
-        }
-        false
-    }
-
-    /// Apply a quest reward to the player
-    fn apply_quest_reward(&mut self, reward: &QuestReward) {
-        match reward {
-            QuestReward::Experience(xp) => {
-                let old_level = self.player.level;
-                if self.player.gain_xp(*xp) {
-                    self.add_message(format!("Reward: +{} XP! LEVEL UP to {}!", xp, self.player.level), 11);
-                    let quest_msgs = self.quest_tracker.on_player_level_changed(self.player.level);
-                    for msg in quest_msgs {
-                        self.add_message(msg, 5);
-                    }
-                } else {
-                    self.add_message(format!("Reward: +{} XP", xp), 9);
-                }
-            }
-            QuestReward::Gold(amount) => {
-                self.player.gold += amount;
-                self.add_message(format!("Reward: +{} Gold", amount), 11);
-                let quest_msgs = self.quest_tracker.on_gold_changed(self.player.gold);
-                for msg in quest_msgs {
-                    self.add_message(msg, 5);
-                }
-            }
-            QuestReward::Item(kind, rarity) => {
-                if self.player.inventory.len() < 20 {
-                    self.player.inventory.push(Item::new(0, 0, *kind, *rarity));
-                    self.add_message(format!("Reward: {}{}", rarity.prefix(), kind.name()), rarity.color_index());
-                } else {
-                    // Drop item at player's feet if inventory is full
-                    self.items.push(Item::new(self.player.x, self.player.y, *kind, *rarity));
-                    self.add_message(format!("Reward dropped: {}{} (inventory full)", rarity.prefix(), kind.name()), rarity.color_index());
-                }
-            }
-            QuestReward::RandomItems(count, min_rarity) => {
-                for _ in 0..*count {
-                    let (kind, mut rarity) = self.random_item();
-                    // Ensure minimum rarity
-                    if rarity < *min_rarity {
-                        rarity = *min_rarity;
-                    }
-                    if self.player.inventory.len() < 20 {
-                        self.player.inventory.push(Item::new(0, 0, kind, rarity));
-                        self.add_message(format!("Reward: {}{}", rarity.prefix(), kind.name()), rarity.color_index());
-                    } else {
-                        self.items.push(Item::new(self.player.x, self.player.y, kind, rarity));
-                        self.add_message(format!("Reward dropped: {}{}", rarity.prefix(), kind.name()), rarity.color_index());
-                    }
-                }
-            }
-            QuestReward::MaxHpBonus(bonus) => {
-                self.player.max_hp += bonus;
-                self.player.hp += bonus;
-                self.add_message(format!("Reward: +{} Max HP", bonus), 3);
-            }
-            QuestReward::MaxManaBonus(bonus) => {
-                self.player.max_mana += bonus;
-                self.player.mana += bonus;
-                self.add_message(format!("Reward: +{} Max Mana", bonus), 7);
-            }
-            QuestReward::AttackBonus(bonus) => {
-                self.player.base_attack += bonus;
-                self.add_message(format!("Reward: +{} Attack", bonus), 11);
-            }
-            QuestReward::DefenseBonus(bonus) => {
-                self.player.base_defense += bonus;
-                self.add_message(format!("Reward: +{} Defense", bonus), 9);
-            }
-            QuestReward::SkillPoint(points) => {
-                self.add_message(format!("Reward: +{} Skill Point(s)", points), 13);
-                // Skill points can be implemented in a future skill tree system
-            }
-            QuestReward::Unlock(feature) => {
-                self.add_message(format!("Unlocked: {}", feature), 13);
-                // Unlocks can be implemented for special features
-            }
-        }
-    }
-
-    /// Get available quests that can be started
-    pub fn get_available_quests(&self) -> Vec<&crate::quests::Quest> {
-        self.quest_tracker.get_available_quests(self.dungeon_level, self.player.level)
-    }
-
-    /// Get active quest IDs
-    pub fn get_active_quest_ids(&self) -> Vec<QuestId> {
-        self.quest_tracker.get_active_quest_ids()
-    }
-
-    /// Get completable quest IDs
-    pub fn get_completable_quest_ids(&self) -> Vec<QuestId> {
-        self.quest_tracker.get_completable_quests()
-    }
-
-    /// Auto-complete all ready quests
-    pub fn auto_complete_quests(&mut self) {
-        let completable: Vec<QuestId> = self.quest_tracker.get_completable_quests();
-        for quest_id in completable {
-            self.complete_quest(quest_id);
-        }
+        // Implementation depends on quest system
     }
 }
 

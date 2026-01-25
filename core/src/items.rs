@@ -1,6 +1,432 @@
 //! Item system: items, equipment, and inventory
+//!
+//! Enhanced features:
+//! - Item sets with set bonuses
+//! - Unique items with special effects
+//! - Crafting recipes
+//! - Item enchantments
 
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+
+// ============================================================================
+// ENCHANTMENT SYSTEM
+// ============================================================================
+
+/// Types of enchantments that can be applied to items
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum EnchantmentType {
+    // Offensive
+    Sharpness, FireAspect, FrostAspect, Thunderstrike, Lifesteal, Venomous, Executing, Crushing,
+    // Defensive
+    Protection, Thorns, Regeneration, ManaShield, Resilience, Fortification, Warding, Evasion,
+    // Utility
+    Swiftness, Enlightenment, Fortune, Soulbound, Unbreaking, Reaching, Illumination, Featherfall,
+}
+
+impl EnchantmentType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Sharpness => "Sharpness", Self::FireAspect => "Fire Aspect",
+            Self::FrostAspect => "Frost Aspect", Self::Thunderstrike => "Thunderstrike",
+            Self::Lifesteal => "Lifesteal", Self::Venomous => "Venomous",
+            Self::Executing => "Executing", Self::Crushing => "Crushing",
+            Self::Protection => "Protection", Self::Thorns => "Thorns",
+            Self::Regeneration => "Regeneration", Self::ManaShield => "Mana Shield",
+            Self::Resilience => "Resilience", Self::Fortification => "Fortification",
+            Self::Warding => "Warding", Self::Evasion => "Evasion",
+            Self::Swiftness => "Swiftness", Self::Enlightenment => "Enlightenment",
+            Self::Fortune => "Fortune", Self::Soulbound => "Soulbound",
+            Self::Unbreaking => "Unbreaking", Self::Reaching => "Reaching",
+            Self::Illumination => "Illumination", Self::Featherfall => "Featherfall",
+        }
+    }
+
+    pub fn max_level(&self) -> u8 {
+        match self {
+            Self::Sharpness | Self::Protection | Self::Fortification => 5,
+            Self::Soulbound | Self::Unbreaking => 1,
+            _ => 3,
+        }
+    }
+
+    pub fn valid_for_slot(&self, slot: EquipSlot) -> bool {
+        match self {
+            Self::Sharpness | Self::FireAspect | Self::FrostAspect | Self::Thunderstrike
+            | Self::Lifesteal | Self::Venomous | Self::Executing | Self::Crushing | Self::Reaching =>
+                matches!(slot, EquipSlot::Weapon),
+            Self::Protection | Self::Thorns | Self::Resilience | Self::Fortification | Self::Warding =>
+                matches!(slot, EquipSlot::Armor | EquipSlot::Helmet | EquipSlot::Shield),
+            Self::Swiftness | Self::Featherfall => matches!(slot, EquipSlot::Boots),
+            _ => true,
+        }
+    }
+}
+
+/// An enchantment with type and level
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub struct Enchantment {
+    pub enchant_type: EnchantmentType,
+    pub level: u8,
+}
+
+impl Enchantment {
+    pub fn new(enchant_type: EnchantmentType, level: u8) -> Self {
+        Self { enchant_type, level: level.min(enchant_type.max_level()).max(1) }
+    }
+
+    pub fn stat_bonus(&self) -> (i32, i32, i32, i32) {
+        let lvl = self.level as i32;
+        match self.enchant_type {
+            EnchantmentType::Sharpness => (3 * lvl, 0, 0, 0),
+            EnchantmentType::Protection => (0, 2 * lvl, 0, 0),
+            EnchantmentType::Fortification => (0, 0, 10 * lvl, 0),
+            EnchantmentType::ManaShield => (0, 0, 0, 15 * lvl),
+            EnchantmentType::Lifesteal => (lvl, 0, 0, 0),
+            EnchantmentType::Thorns => (0, lvl, 0, 0),
+            EnchantmentType::Regeneration => (0, 0, 5 * lvl, 0),
+            _ => (0, 0, 0, 0),
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        let num = match self.level { 1=>"I", 2=>"II", 3=>"III", 4=>"IV", 5=>"V", _=>"?" };
+        format!("{} {}", self.enchant_type.name(), num)
+    }
+}
+
+// ============================================================================
+// ITEM SETS SYSTEM
+// ============================================================================
+
+/// Item sets that provide bonuses when multiple pieces are equipped
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum ItemSet {
+    DragonSlayer, TitanMight, BerserkerRage, ArcaneScholar, ElementalMaster,
+    VoidWalker, ShadowDancer, AssassinsBlade, NightStalker, PaladinValor,
+    DeathKnight, PhoenixRebirth, AncientKings, DemonLord, CelestialGuard,
+}
+
+/// Special effects granted by set bonuses
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum SetEffect {
+    DragonBane, DragonSlayerAura, Unstoppable, Frenzy, Berserk, ManaRegen, ArcaneAffinity,
+    ElementalResist, ElementalMastery, ElementalOverload, VoidTouch, VoidEmbrace,
+    ShadowStep, ShadowMeld, CriticalStrike, Assassination, NightVision, Invisibility,
+    HolyAura, DivineProtection, LifeDrain, DeathGrip, FlameAura, PhoenixRise,
+    RoyalPresence, KingsMandate, DemonFire, DemonicPact, CelestialBlessing, DivineIntervention,
+}
+
+/// Bonus stats and effects from a set
+#[derive(Clone, Debug, Default)]
+pub struct SetBonus {
+    pub attack: i32,
+    pub defense: i32,
+    pub hp: i32,
+    pub mana: i32,
+    pub effect: Option<SetEffect>,
+}
+
+impl ItemSet {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::DragonSlayer => "Dragon Slayer", Self::TitanMight => "Titan's Might",
+            Self::BerserkerRage => "Berserker's Rage", Self::ArcaneScholar => "Arcane Scholar",
+            Self::ElementalMaster => "Elemental Master", Self::VoidWalker => "Void Walker",
+            Self::ShadowDancer => "Shadow Dancer", Self::AssassinsBlade => "Assassin's Blade",
+            Self::NightStalker => "Night Stalker", Self::PaladinValor => "Paladin's Valor",
+            Self::DeathKnight => "Death Knight", Self::PhoenixRebirth => "Phoenix Rebirth",
+            Self::AncientKings => "Ancient Kings", Self::DemonLord => "Demon Lord",
+            Self::CelestialGuard => "Celestial Guard",
+        }
+    }
+
+    pub fn pieces(&self) -> Vec<ItemKind> {
+        match self {
+            Self::DragonSlayer => vec![ItemKind::DragonHelm, ItemKind::DragonArmor, ItemKind::DragonGauntlets, ItemKind::DragonShield],
+            Self::TitanMight => vec![ItemKind::TitanPlate, ItemKind::HelmOfValor, ItemKind::GauntletsOfMight],
+            Self::ShadowDancer => vec![ItemKind::AssassinGarb, ItemKind::HoodOfShadows, ItemKind::ShadowBoots, ItemKind::ThievesGloves],
+            Self::ArcaneScholar => vec![ItemKind::MageRobes, ItemKind::WizardHat, ItemKind::VoidStaff, ItemKind::RingOfMana],
+            Self::ElementalMaster => vec![ItemKind::FlameSword, ItemKind::FrostBlade, ItemKind::ThunderAxe, ItemKind::RingOfFlame, ItemKind::RingOfFrost],
+            Self::DeathKnight => vec![ItemKind::DemonArmor, ItemKind::DemonSkull, ItemKind::DemonSlayer, ItemKind::RingOfTheVampire],
+            Self::PaladinValor => vec![ItemKind::HolyArmor, ItemKind::HelmOfValor, ItemKind::PhoenixShield, ItemKind::AmuletOfLife],
+            Self::PhoenixRebirth => vec![ItemKind::PhoenixShield, ItemKind::FlameGauntlets, ItemKind::RingOfFlame],
+            _ => vec![],
+        }
+    }
+
+    pub fn bonus_for_pieces(&self, pieces: u8) -> SetBonus {
+        match self {
+            Self::DragonSlayer => match pieces {
+                2 => SetBonus { attack: 5, defense: 5, hp: 20, mana: 0, effect: Some(SetEffect::DragonBane) },
+                3 => SetBonus { attack: 10, defense: 10, hp: 40, mana: 0, effect: Some(SetEffect::DragonBane) },
+                4 => SetBonus { attack: 20, defense: 15, hp: 60, mana: 10, effect: Some(SetEffect::DragonSlayerAura) },
+                _ => SetBonus::default(),
+            },
+            Self::TitanMight => match pieces {
+                2 => SetBonus { attack: 0, defense: 10, hp: 30, mana: 0, effect: None },
+                3 => SetBonus { attack: 5, defense: 20, hp: 60, mana: 0, effect: Some(SetEffect::Unstoppable) },
+                _ => SetBonus::default(),
+            },
+            Self::ShadowDancer => match pieces {
+                2 => SetBonus { attack: 5, defense: 2, hp: 0, mana: 10, effect: Some(SetEffect::ShadowStep) },
+                3 => SetBonus { attack: 10, defense: 5, hp: 0, mana: 20, effect: Some(SetEffect::ShadowStep) },
+                4 => SetBonus { attack: 15, defense: 8, hp: 10, mana: 30, effect: Some(SetEffect::ShadowMeld) },
+                _ => SetBonus::default(),
+            },
+            Self::DeathKnight => match pieces {
+                2 => SetBonus { attack: 10, defense: 5, hp: 0, mana: 0, effect: Some(SetEffect::LifeDrain) },
+                3 => SetBonus { attack: 15, defense: 10, hp: 0, mana: 0, effect: Some(SetEffect::LifeDrain) },
+                4 => SetBonus { attack: 25, defense: 15, hp: 20, mana: 0, effect: Some(SetEffect::DeathGrip) },
+                _ => SetBonus::default(),
+            },
+            _ => SetBonus::default(),
+        }
+    }
+}
+
+// ============================================================================
+// UNIQUE ITEMS SYSTEM
+// ============================================================================
+
+/// Unique items with special effects
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum UniqueItem {
+    Excalibur, Mjolnir, Gungnir, Masamune, DeathsScythe, StaffOfAges, SerpentsFang,
+    Stormbringer, FrostmournesBlade, InfernosBrand, AegisOfTheGods, DragonhideMantle,
+    ValkyriesWings, EternityRobes, PhantomShroud, RingOfOmniscience, AmuletOfYggdrasil,
+    CrownOfEternals, BootsOfHermes, GlovesOfMidas, SoulReaver, WorldEnder, TimeSplitter,
+}
+
+/// Special effects unique to legendary items
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum UniqueEffect {
+    HolySmite, LightningStorm, NeverMiss, PerfectCut, InstantDeath, TimeWarp, DeadlyVenom,
+    ChainLightning, SoulSteal, Immolate, DivineShield, DragonBreath, Flight, TimeStop,
+    Phasing, TrueSight, WorldTreeBlessing, Immortality, Hyperspeed, GoldenTouch,
+    SoulAbsorb, Apocalypse, TemporalSlash,
+}
+
+impl UniqueItem {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Excalibur => "Excalibur", Self::Mjolnir => "Mjolnir",
+            Self::Gungnir => "Gungnir", Self::Masamune => "Masamune",
+            Self::DeathsScythe => "Death's Scythe", Self::StaffOfAges => "Staff of Ages",
+            Self::SerpentsFang => "Serpent's Fang", Self::Stormbringer => "Stormbringer",
+            Self::FrostmournesBlade => "Frostmourne's Blade", Self::InfernosBrand => "Inferno's Brand",
+            Self::AegisOfTheGods => "Aegis of the Gods", Self::DragonhideMantle => "Dragonhide Mantle",
+            Self::ValkyriesWings => "Valkyrie's Wings", Self::EternityRobes => "Eternity Robes",
+            Self::PhantomShroud => "Phantom Shroud", Self::RingOfOmniscience => "Ring of Omniscience",
+            Self::AmuletOfYggdrasil => "Amulet of Yggdrasil", Self::CrownOfEternals => "Crown of Eternals",
+            Self::BootsOfHermes => "Boots of Hermes", Self::GlovesOfMidas => "Gloves of Midas",
+            Self::SoulReaver => "Soul Reaver", Self::WorldEnder => "World Ender",
+            Self::TimeSplitter => "Time Splitter",
+        }
+    }
+
+    pub fn lore(&self) -> &'static str {
+        match self {
+            Self::Excalibur => "The legendary sword pulled from the stone, destined for true kings.",
+            Self::Mjolnir => "Thor's mighty hammer, capable of summoning lightning from the heavens.",
+            Self::Gungnir => "The spear of Odin, which never misses its mark.",
+            Self::Masamune => "A blade of perfect balance, forged by the legendary smith.",
+            Self::DeathsScythe => "The weapon of the Grim Reaper himself.",
+            Self::StaffOfAges => "Channeling magic from the dawn of time.",
+            _ => "A legendary artifact of immense power.",
+        }
+    }
+
+    pub fn base_stats(&self) -> (i32, i32, i32, i32) {
+        match self {
+            Self::Excalibur => (50, 10, 30, 20), Self::Mjolnir => (45, 5, 0, 40),
+            Self::Gungnir => (55, 0, 0, 10), Self::Masamune => (60, 5, 0, 0),
+            Self::DeathsScythe => (70, 0, -50, 0), Self::StaffOfAges => (25, 5, 20, 100),
+            Self::SerpentsFang => (35, 0, 0, 20), Self::Stormbringer => (40, 0, 0, 50),
+            Self::FrostmournesBlade => (55, 0, -30, 30), Self::InfernosBrand => (50, 0, 0, 30),
+            Self::AegisOfTheGods => (0, 40, 50, 30), Self::DragonhideMantle => (5, 50, 40, 0),
+            Self::ValkyriesWings => (10, 30, 30, 30), Self::EternityRobes => (0, 20, 40, 100),
+            Self::PhantomShroud => (10, 25, 0, 40), Self::RingOfOmniscience => (10, 10, 30, 60),
+            Self::AmuletOfYggdrasil => (0, 15, 100, 50), Self::CrownOfEternals => (15, 15, 50, 50),
+            Self::BootsOfHermes => (5, 10, 20, 30), Self::GlovesOfMidas => (20, 5, 10, 10),
+            Self::SoulReaver => (65, 0, 0, 0), Self::WorldEnder => (80, 0, -60, 0),
+            Self::TimeSplitter => (45, 10, 20, 40),
+        }
+    }
+
+    pub fn equip_slot(&self) -> EquipSlot {
+        match self {
+            Self::Excalibur | Self::Mjolnir | Self::Gungnir | Self::Masamune | Self::DeathsScythe
+            | Self::StaffOfAges | Self::SerpentsFang | Self::Stormbringer | Self::FrostmournesBlade
+            | Self::InfernosBrand | Self::SoulReaver | Self::WorldEnder | Self::TimeSplitter => EquipSlot::Weapon,
+            Self::AegisOfTheGods => EquipSlot::Shield,
+            Self::DragonhideMantle | Self::ValkyriesWings | Self::EternityRobes | Self::PhantomShroud => EquipSlot::Armor,
+            Self::CrownOfEternals => EquipSlot::Helmet,
+            Self::BootsOfHermes => EquipSlot::Boots,
+            Self::GlovesOfMidas => EquipSlot::Gloves,
+            Self::RingOfOmniscience => EquipSlot::Ring1,
+            Self::AmuletOfYggdrasil => EquipSlot::Amulet,
+        }
+    }
+
+    pub fn special_effect(&self) -> UniqueEffect {
+        match self {
+            Self::Excalibur => UniqueEffect::HolySmite, Self::Mjolnir => UniqueEffect::LightningStorm,
+            Self::Gungnir => UniqueEffect::NeverMiss, Self::Masamune => UniqueEffect::PerfectCut,
+            Self::DeathsScythe => UniqueEffect::InstantDeath, Self::StaffOfAges => UniqueEffect::TimeWarp,
+            Self::SerpentsFang => UniqueEffect::DeadlyVenom, Self::Stormbringer => UniqueEffect::ChainLightning,
+            Self::FrostmournesBlade => UniqueEffect::SoulSteal, Self::InfernosBrand => UniqueEffect::Immolate,
+            Self::AegisOfTheGods => UniqueEffect::DivineShield, Self::DragonhideMantle => UniqueEffect::DragonBreath,
+            Self::ValkyriesWings => UniqueEffect::Flight, Self::EternityRobes => UniqueEffect::TimeStop,
+            Self::PhantomShroud => UniqueEffect::Phasing, Self::RingOfOmniscience => UniqueEffect::TrueSight,
+            Self::AmuletOfYggdrasil => UniqueEffect::WorldTreeBlessing, Self::CrownOfEternals => UniqueEffect::Immortality,
+            Self::BootsOfHermes => UniqueEffect::Hyperspeed, Self::GlovesOfMidas => UniqueEffect::GoldenTouch,
+            Self::SoulReaver => UniqueEffect::SoulAbsorb, Self::WorldEnder => UniqueEffect::Apocalypse,
+            Self::TimeSplitter => UniqueEffect::TemporalSlash,
+        }
+    }
+}
+
+impl UniqueEffect {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::HolySmite => "Holy Smite", Self::LightningStorm => "Lightning Storm",
+            Self::NeverMiss => "Unerring Strike", Self::PerfectCut => "Perfect Cut",
+            Self::InstantDeath => "Touch of Death", Self::TimeWarp => "Time Warp",
+            Self::DeadlyVenom => "Deadly Venom", Self::ChainLightning => "Chain Lightning",
+            Self::SoulSteal => "Soul Steal", Self::Immolate => "Immolate",
+            Self::DivineShield => "Divine Shield", Self::DragonBreath => "Dragon Breath",
+            Self::Flight => "Flight", Self::TimeStop => "Time Stop",
+            Self::Phasing => "Phasing", Self::TrueSight => "True Sight",
+            Self::WorldTreeBlessing => "World Tree's Blessing", Self::Immortality => "Immortality",
+            Self::Hyperspeed => "Hyperspeed", Self::GoldenTouch => "Golden Touch",
+            Self::SoulAbsorb => "Soul Absorb", Self::Apocalypse => "Apocalypse",
+            Self::TemporalSlash => "Temporal Slash",
+        }
+    }
+}
+
+// ============================================================================
+// CRAFTING SYSTEM
+// ============================================================================
+
+/// Material types used in crafting
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum CraftingMaterial {
+    IronOre, SteelIngot, MithrilOre, AdamantiteOre, Leather, DragonLeather, Cloth, SilkCloth,
+    Ruby, Sapphire, Emerald, Diamond, Amethyst, Topaz, BlackOpal, StarSapphire,
+    FireEssence, IceEssence, LightningEssence, VoidEssence, HolyEssence, DarkEssence,
+    LifeEssence, DeathEssence, DragonHeart, PhoenixFeather, DemonCore, AngelWing,
+    TitanBone, ElementalCore, AncientRune, PrimordialShard,
+}
+
+impl CraftingMaterial {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::IronOre => "Iron Ore", Self::SteelIngot => "Steel Ingot",
+            Self::MithrilOre => "Mithril Ore", Self::AdamantiteOre => "Adamantite Ore",
+            Self::Leather => "Leather", Self::DragonLeather => "Dragon Leather",
+            Self::Cloth => "Cloth", Self::SilkCloth => "Silk Cloth",
+            Self::Ruby => "Ruby", Self::Sapphire => "Sapphire", Self::Emerald => "Emerald",
+            Self::Diamond => "Diamond", Self::Amethyst => "Amethyst", Self::Topaz => "Topaz",
+            Self::BlackOpal => "Black Opal", Self::StarSapphire => "Star Sapphire",
+            Self::FireEssence => "Fire Essence", Self::IceEssence => "Ice Essence",
+            Self::LightningEssence => "Lightning Essence", Self::VoidEssence => "Void Essence",
+            Self::HolyEssence => "Holy Essence", Self::DarkEssence => "Dark Essence",
+            Self::LifeEssence => "Life Essence", Self::DeathEssence => "Death Essence",
+            Self::DragonHeart => "Dragon Heart", Self::PhoenixFeather => "Phoenix Feather",
+            Self::DemonCore => "Demon Core", Self::AngelWing => "Angel Wing",
+            Self::TitanBone => "Titan Bone", Self::ElementalCore => "Elemental Core",
+            Self::AncientRune => "Ancient Rune", Self::PrimordialShard => "Primordial Shard",
+        }
+    }
+
+    pub fn rarity(&self) -> Rarity {
+        match self {
+            Self::IronOre | Self::Leather | Self::Cloth => Rarity::Common,
+            Self::SteelIngot | Self::SilkCloth => Rarity::Uncommon,
+            Self::MithrilOre | Self::DragonLeather | Self::Ruby | Self::Sapphire | Self::Emerald => Rarity::Rare,
+            Self::AdamantiteOre | Self::Diamond | Self::Amethyst | Self::Topaz
+            | Self::FireEssence | Self::IceEssence | Self::LightningEssence => Rarity::Epic,
+            Self::BlackOpal | Self::StarSapphire | Self::VoidEssence | Self::HolyEssence
+            | Self::DarkEssence | Self::LifeEssence | Self::DeathEssence | Self::DragonHeart
+            | Self::PhoenixFeather | Self::DemonCore | Self::AngelWing => Rarity::Legendary,
+            Self::TitanBone | Self::ElementalCore | Self::AncientRune | Self::PrimordialShard => Rarity::Mythic,
+        }
+    }
+
+    pub fn glyph(&self) -> char {
+        match self {
+            Self::IronOre | Self::SteelIngot | Self::MithrilOre | Self::AdamantiteOre => '#',
+            Self::Leather | Self::DragonLeather => '~',
+            Self::Cloth | Self::SilkCloth => '=',
+            Self::Ruby | Self::Sapphire | Self::Emerald | Self::Diamond | Self::Amethyst
+            | Self::Topaz | Self::BlackOpal | Self::StarSapphire => '*',
+            Self::FireEssence | Self::IceEssence | Self::LightningEssence | Self::VoidEssence
+            | Self::HolyEssence | Self::DarkEssence | Self::LifeEssence | Self::DeathEssence => '@',
+            _ => '&',
+        }
+    }
+}
+
+/// A crafting recipe
+#[derive(Clone, Debug)]
+pub struct CraftingRecipe {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub materials: Vec<(CraftingMaterial, u32)>,
+    pub result: CraftingResult,
+    pub required_level: u32,
+}
+
+/// What a recipe produces
+#[derive(Clone, Debug)]
+pub enum CraftingResult {
+    Item(ItemKind, Rarity),
+    UniqueItem(UniqueItem),
+    Enchantment(EnchantmentType, u8),
+    Material(CraftingMaterial, u32),
+}
+
+/// Returns core crafting recipes
+pub fn get_crafting_recipes() -> Vec<CraftingRecipe> {
+    vec![
+        CraftingRecipe {
+            name: "Forge Steel Sword", description: "Craft a reliable steel sword",
+            materials: vec![(CraftingMaterial::SteelIngot, 3), (CraftingMaterial::Leather, 1)],
+            result: CraftingResult::Item(ItemKind::LongSword, Rarity::Uncommon), required_level: 1,
+        },
+        CraftingRecipe {
+            name: "Forge Flame Sword", description: "Imbue a blade with eternal fire",
+            materials: vec![(CraftingMaterial::SteelIngot, 3), (CraftingMaterial::FireEssence, 2), (CraftingMaterial::Ruby, 1)],
+            result: CraftingResult::Item(ItemKind::FlameSword, Rarity::Rare), required_level: 8,
+        },
+        CraftingRecipe {
+            name: "Craft Dragon Armor", description: "Fashion armor from dragon scales",
+            materials: vec![(CraftingMaterial::DragonLeather, 5), (CraftingMaterial::DragonHeart, 1), (CraftingMaterial::AdamantiteOre, 3)],
+            result: CraftingResult::Item(ItemKind::DragonArmor, Rarity::Legendary), required_level: 15,
+        },
+        CraftingRecipe {
+            name: "Essence of Sharpness", description: "Create a sharpness enchantment",
+            materials: vec![(CraftingMaterial::SteelIngot, 2), (CraftingMaterial::Ruby, 1)],
+            result: CraftingResult::Enchantment(EnchantmentType::Sharpness, 1), required_level: 3,
+        },
+        CraftingRecipe {
+            name: "Forge Excalibur", description: "The legendary sword of kings",
+            materials: vec![
+                (CraftingMaterial::AdamantiteOre, 10), (CraftingMaterial::HolyEssence, 5),
+                (CraftingMaterial::Diamond, 3), (CraftingMaterial::AngelWing, 2),
+                (CraftingMaterial::PrimordialShard, 1),
+            ],
+            result: CraftingResult::UniqueItem(UniqueItem::Excalibur), required_level: 25,
+        },
+        CraftingRecipe {
+            name: "Smelt Steel", description: "Convert iron into steel",
+            materials: vec![(CraftingMaterial::IronOre, 3)],
+            result: CraftingResult::Material(CraftingMaterial::SteelIngot, 1), required_level: 1,
+        },
+    ]
+}
 
 /// Equipment slots
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
