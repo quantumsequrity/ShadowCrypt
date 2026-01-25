@@ -2,14 +2,21 @@
 name = "shadowcrypt-gui"
 version = "0.1.0"
 edition = "2021"
-description = "GUI frontend for ShadowCrypt roguelike"
+description = "GUI frontend for ShadowCrypt roguelike with multi-agent system"
 authors = ["bloodraven"]
 
 [[bin]]
 name = "shadowcrypt-gui"
 path = "src/main.rs"
 
+[[bin]]
+name = "shadowcrypt-agents-gui"
+path = "src/agents_main.rs"
+
 [dependencies]
 shadowcrypt-core = { path = "../core" }
+shadowcrypt-agents = { path = "../crates/shadowcrypt-agents" }
 egui = "0.31"
 eframe = "0.31"
+rand = "0.8"
+parking_lot = "0.12"

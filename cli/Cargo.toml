@@ -2,14 +2,20 @@
 name = "shadowcrypt-cli"
 version = "0.1.0"
 edition = "2021"
-description = "Terminal CLI frontend for ShadowCrypt roguelike"
+description = "Terminal CLI frontend for ShadowCrypt roguelike with multi-agent system"
 authors = ["bloodraven"]
 
 [[bin]]
 name = "shadowcrypt"
 path = "src/main.rs"
 
+[[bin]]
+name = "shadowcrypt-agents"
+path = "src/agents_main.rs"
+
 [dependencies]
 shadowcrypt-core = { path = "../core" }
+shadowcrypt-agents = { path = "../crates/shadowcrypt-agents" }
 crossterm = "0.28"
 rand = "0.8"
+parking_lot = "0.12"

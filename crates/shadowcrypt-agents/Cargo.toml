@@ -1,0 +1,25 @@
+[package]
+name = "shadowcrypt-agents"
+version = "0.1.0"
+edition = "2024"
+authors = ["bloodraven"]
+license = "MIT"
+description = "Multi-agent system for ShadowCrypt with 75+ autonomous agents"
+
+[dependencies]
+shadowcrypt-core = { path = "../../core" }
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+crossbeam = "0.8"
+parking_lot = "0.12"
+rayon = "1.10"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+petgraph = "0.6"
+indexmap = "2.0"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "agent_benchmark"
+harness = false
