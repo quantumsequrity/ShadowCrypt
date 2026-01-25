@@ -1372,7 +1372,7 @@ impl ItemKind {
     }
 }
 
-/// An item instance with position and rarity
+/// An item instance with position, rarity, enchantments, and more
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Item {
     pub x: usize,
@@ -1383,33 +1383,69 @@ pub struct Item {
     pub food_quality: Option<FoodQuality>,
     /// Turns until food spoils (0 = doesn't spoil)
     pub spoil_timer: u32,
+    /// Enchantments applied to this item
+    #[serde(default)]
+    pub enchantments: Vec<Enchantment>,
+    /// If this is a unique item
+    #[serde(default)]
+    pub unique: Option<UniqueItem>,
+    /// If identified (for unknown items)
+    #[serde(default = "default_true")]
+    pub identified: bool,
+    /// Durability (100 = full, 0 = broken)
+    #[serde(default = "default_durability")]
+    pub durability: u8,
+    /// Number of times this item has been upgraded
+    #[serde(default)]
+    pub upgrade_level: u8,
 }
+
+fn default_true() -> bool { true }
+fn default_durability() -> u8 { 100 }
 
 impl Item {
     /// Create a new item at the given position
     pub fn new(x: usize, y: usize, kind: ItemKind, rarity: Rarity) -> Self {
         let (food_quality, spoil_timer) = if kind.is_food() {
             let quality = kind.default_food_quality();
-            // Foods can spoil over time (except legendary and rotten)
             let timer = if quality.can_spoil() { 500 } else { 0 };
             (Some(quality), timer)
         } else {
             (None, 0)
         };
 
-        Self { x, y, kind, rarity, food_quality, spoil_timer }
+        Self {
+            x, y, kind, rarity, food_quality, spoil_timer,
+            enchantments: Vec::new(), unique: None,
+            identified: true, durability: 100, upgrade_level: 0,
+        }
+    }
+
+    /// Create a new unique item
+    pub fn new_unique(x: usize, y: usize, unique: UniqueItem) -> Self {
+        Self {
+            x, y, kind: ItemKind::AncientRelic, rarity: Rarity::Mythic,
+            food_quality: None, spoil_timer: 0,
+            enchantments: Vec::new(), unique: Some(unique),
+            identified: false, durability: 100, upgrade_level: 0,
+        }
+    }
+
+    /// Create an item with enchantments
+    pub fn new_enchanted(x: usize, y: usize, kind: ItemKind, rarity: Rarity, enchantments: Vec<Enchantment>) -> Self {
+        let mut item = Self::new(x, y, kind, rarity);
+        item.enchantments = enchantments;
+        item
     }
 
     /// Create a food item with specific quality
     pub fn new_food(x: usize, y: usize, kind: ItemKind, quality: FoodQuality) -> Self {
         let spoil_timer = if quality.can_spoil() { 500 } else { 0 };
         Self {
-            x,
-            y,
-            kind,
-            rarity: Rarity::Common,
-            food_quality: Some(quality),
-            spoil_timer,
+            x, y, kind, rarity: Rarity::Common,
+            food_quality: Some(quality), spoil_timer,
+            enchantments: Vec::new(), unique: None,
+            identified: true, durability: 100, upgrade_level: 0,
         }
     }
 
@@ -1425,32 +1461,165 @@ impl Item {
             if self.spoil_timer == 0 {
                 if let Some(ref mut quality) = self.food_quality {
                     *quality = quality.spoiled();
-                    // Reset timer if can still spoil further
-                    if quality.can_spoil() {
-                        self.spoil_timer = 300;
-                    }
-                    return true; // Quality changed
+                    if quality.can_spoil() { self.spoil_timer = 300; }
+                    return true;
                 }
             }
         }
         false
     }
 
-    /// Returns the stats of this item scaled by rarity
+    /// Returns the stats of this item scaled by rarity and enchantments
     pub fn stats(&self) -> (i32, i32, i32, i32) {
+        // Unique items use their own stats
+        if let Some(unique) = &self.unique {
+            return unique.base_stats();
+        }
+
         let (atk, def, hp, mana) = self.kind.base_stats();
         let mult = self.rarity.stat_bonus();
-        (
-            (atk as f32 * mult) as i32,
-            (def as f32 * mult) as i32,
-            (hp as f32 * mult) as i32,
-            (mana as f32 * mult) as i32,
-        )
+        let mut final_atk = (atk as f32 * mult) as i32;
+        let mut final_def = (def as f32 * mult) as i32;
+        let mut final_hp = (hp as f32 * mult) as i32;
+        let mut final_mana = (mana as f32 * mult) as i32;
+
+        // Add enchantment bonuses
+        for ench in &self.enchantments {
+            let (e_atk, e_def, e_hp, e_mana) = ench.stat_bonus();
+            final_atk += e_atk; final_def += e_def; final_hp += e_hp; final_mana += e_mana;
+        }
+
+        // Apply upgrade bonus (+5% per level)
+        let upgrade_mult = 1.0 + (self.upgrade_level as f32 * 0.05);
+        final_atk = (final_atk as f32 * upgrade_mult) as i32;
+        final_def = (final_def as f32 * upgrade_mult) as i32;
+
+        (final_atk, final_def, final_hp, final_mana)
     }
 
-    /// Returns the display name including rarity prefix
+    /// Returns the display name including rarity prefix and enchantments
     pub fn display_name(&self) -> String {
-        format!("{}{}", self.rarity.prefix(), self.kind.name())
+        if let Some(unique) = &self.unique {
+            return if self.identified { unique.name().to_string() } else { "Mysterious Artifact".to_string() };
+        }
+
+        let mut name = format!("{}{}", self.rarity.prefix(), self.kind.name());
+        if self.upgrade_level > 0 { name = format!("{} +{}", name, self.upgrade_level); }
+        if let Some(ench) = self.enchantments.first() {
+            name = format!("{} of {}", name, ench.enchant_type.name());
+        }
+        name
+    }
+
+    /// Add an enchantment to this item
+    pub fn add_enchantment(&mut self, enchantment: Enchantment) -> bool {
+        if let Some(slot) = self.kind.equip_slot() {
+            if !enchantment.enchant_type.valid_for_slot(slot) { return false; }
+        }
+        for existing in &mut self.enchantments {
+            if existing.enchant_type == enchantment.enchant_type {
+                if existing.level < existing.enchant_type.max_level() {
+                    existing.level += 1; return true;
+                }
+                return false;
+            }
+        }
+        let max = match self.rarity { Rarity::Common => 1, Rarity::Uncommon => 2, Rarity::Rare => 3, Rarity::Epic => 4, Rarity::Legendary => 5, Rarity::Mythic => 6 };
+        if self.enchantments.len() >= max { return false; }
+        self.enchantments.push(enchantment);
+        true
+    }
+
+    /// Check if item has a specific enchantment
+    pub fn has_enchantment(&self, enchant_type: EnchantmentType) -> bool {
+        self.enchantments.iter().any(|e| e.enchant_type == enchant_type)
+    }
+
+    /// Get enchantment level for a type (0 if not present)
+    pub fn enchantment_level(&self, enchant_type: EnchantmentType) -> u8 {
+        self.enchantments.iter().find(|e| e.enchant_type == enchant_type).map(|e| e.level).unwrap_or(0)
+    }
+
+    /// Upgrade this item
+    pub fn upgrade(&mut self) -> bool {
+        let max = match self.rarity { Rarity::Common => 3, Rarity::Uncommon => 5, Rarity::Rare => 7, Rarity::Epic => 10, Rarity::Legendary => 15, Rarity::Mythic => 20 };
+        if self.upgrade_level < max { self.upgrade_level += 1; true } else { false }
+    }
+
+    /// Repair this item
+    pub fn repair(&mut self, amount: u8) { self.durability = (self.durability + amount).min(100); }
+
+    /// Damage this item's durability
+    pub fn damage(&mut self, amount: u8) { self.durability = self.durability.saturating_sub(amount); }
+
+    /// Check if item is broken
+    pub fn is_broken(&self) -> bool { self.durability == 0 }
+
+    /// Get the set this item belongs to
+    pub fn item_set(&self) -> Option<ItemSet> {
+        let sets = [ItemSet::DragonSlayer, ItemSet::TitanMight, ItemSet::ShadowDancer, ItemSet::ArcaneScholar,
+            ItemSet::ElementalMaster, ItemSet::DeathKnight, ItemSet::PaladinValor, ItemSet::PhoenixRebirth];
+        for set in sets { if set.pieces().contains(&self.kind) { return Some(set); } }
+        None
+    }
+}
+
+// ============================================================================
+// EQUIPMENT SET TRACKING
+// ============================================================================
+
+/// Tracks equipped items and calculates set bonuses
+#[derive(Clone, Debug, Default)]
+pub struct EquipmentSet {
+    equipped: HashMap<EquipSlot, Item>,
+}
+
+impl EquipmentSet {
+    pub fn new() -> Self { Self { equipped: HashMap::new() } }
+
+    pub fn equip(&mut self, item: Item) -> Option<Item> {
+        if let Some(slot) = item.kind.equip_slot() {
+            self.equipped.insert(slot, item)
+        } else if let Some(unique) = &item.unique {
+            self.equipped.insert(unique.equip_slot(), item)
+        } else { None }
+    }
+
+    pub fn unequip(&mut self, slot: EquipSlot) -> Option<Item> { self.equipped.remove(&slot) }
+    pub fn get(&self, slot: EquipSlot) -> Option<&Item> { self.equipped.get(&slot) }
+
+    pub fn total_stats(&self) -> (i32, i32, i32, i32) {
+        let mut total = (0, 0, 0, 0);
+        for item in self.equipped.values() {
+            let (atk, def, hp, mana) = item.stats();
+            total.0 += atk; total.1 += def; total.2 += hp; total.3 += mana;
+        }
+        for bonus in self.get_active_set_bonuses() {
+            total.0 += bonus.attack; total.1 += bonus.defense; total.2 += bonus.hp; total.3 += bonus.mana;
+        }
+        total
+    }
+
+    pub fn get_active_set_bonuses(&self) -> Vec<SetBonus> {
+        let mut bonuses = Vec::new();
+        let mut set_counts: HashMap<ItemSet, u8> = HashMap::new();
+        for item in self.equipped.values() {
+            if let Some(set) = item.item_set() { *set_counts.entry(set).or_insert(0) += 1; }
+        }
+        for (set, count) in set_counts {
+            if count >= 2 { bonuses.push(set.bonus_for_pieces(count)); }
+        }
+        bonuses
+    }
+
+    pub fn get_active_effects(&self) -> Vec<SetEffect> {
+        self.get_active_set_bonuses().into_iter().filter_map(|b| b.effect).collect()
+    }
+
+    pub fn has_effect(&self, effect: SetEffect) -> bool { self.get_active_effects().contains(&effect) }
+
+    pub fn get_unique_effects(&self) -> Vec<UniqueEffect> {
+        self.equipped.values().filter_map(|item| item.unique.as_ref()).map(|u| u.special_effect()).collect()
     }
 }
 

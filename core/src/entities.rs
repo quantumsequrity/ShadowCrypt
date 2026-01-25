@@ -5,7 +5,7 @@ use rand::prelude::*;
 use serde::{Serialize, Deserialize};
 
 use crate::classes::CharacterClass;
-use crate::combat::StatusEffect;
+use crate::combat::{StatusEffect, ElementType, ElementalResistances};
 use crate::companions::Companion;
 use crate::items::{EquipSlot, Item, ItemKind, FoodQuality};
 use crate::magic::Skill;
@@ -818,6 +818,10 @@ pub struct Player {
     pub cooking_skill: u32,
     /// Meals cooked (for skill progression)
     pub meals_cooked: u32,
+    /// Base elemental resistances (from class/level)
+    pub base_elemental_resistances: ElementalResistances,
+    /// Temporary elemental resistance bonuses (from potions, etc.)
+    pub temp_elemental_resistances: HashMap<ElementType, (f32, u32)>,
 }
 
 impl Player {

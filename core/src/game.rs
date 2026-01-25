@@ -586,11 +586,22 @@ impl GameState {
                 for msg in quest_msgs {
                     self.add_message(msg, 5);
                 }
+                // Track level for achievements
+                self.achievement_tracker.record_level_up(self.player.level, self.turn_count);
             }
 
             if is_boss {
                 self.boss_defeated = true;
                 self.add_message("BOSS DEFEATED! The stairs are now accessible!".to_string(), 11);
+
+                // Track boss defeat for achievements
+                let boss_turns = self.achievement_tracker.run_stats.turns_in_boss_fight;
+                let boss_damage = self.achievement_tracker.run_stats.boss_fight_damage_taken;
+                self.achievement_tracker.record_boss_defeat(enemy_kind, boss_turns, boss_damage, self.turn_count);
+
+                // Reset boss fight tracking
+                self.achievement_tracker.run_stats.turns_in_boss_fight = 0;
+                self.achievement_tracker.run_stats.boss_fight_damage_taken = 0;
 
                 // Boss drops legendary loot
                 let loot_kinds = [
@@ -608,6 +619,14 @@ impl GameState {
                 if self.dungeon_level == 30 {
                     self.victory = true;
                     self.add_message("YOU HAVE DEFEATED THE DEMON KING! VICTORY!".to_string(), 11);
+
+                    // Track victory for achievements
+                    self.achievement_tracker.record_victory(
+                        self.player.class,
+                        self.turn_count,
+                        self.player.level,
+                        self.turn_count
+                    );
                 }
             }
 
@@ -801,15 +820,27 @@ impl GameState {
             for msg in quest_msgs {
                 self.add_message(msg, 5);
             }
+            // Track gold for achievements
+            self.achievement_tracker.record_gold_collected(self.player.gold, self.turn_count);
         }
 
-        // Track item collection for quests
+        // Track item collection for quests and achievements
         for (kind, rarity) in items_collected {
             let quest_msgs = self.quest_tracker.on_item_collected(kind, rarity);
             for msg in quest_msgs {
                 self.add_message(msg, 5);
             }
+            // Track item for achievements
+            self.achievement_tracker.record_item_found(kind.name(), rarity, self.dungeon_level, self.turn_count);
+
+            // Track weapon equipment for achievements
+            if kind.equip_slot() == Some(EquipSlot::Weapon) {
+                self.achievement_tracker.record_weapon_equipped(kind.name(), self.turn_count);
+            }
         }
+
+        // Track key count for achievements
+        self.achievement_tracker.record_keys(self.player.keys, self.turn_count);
 
         // Remove picked up items
         let to_remove: Vec<usize> = self.items.iter().enumerate()

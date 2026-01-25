@@ -2948,6 +2948,245 @@ pub fn calculate_combat_damage(
     result
 }
 
+// ============================================================================
+// BOSS PHASE SYSTEM
+// ============================================================================
+
+/// Represents the current phase of a boss fight
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum BossPhase { Phase1, Phase2, Phase3, FinalStand, Enraged }
+
+impl BossPhase {
+    pub fn damage_multiplier(&self) -> f32 {
+        match self { Self::Phase1 => 1.0, Self::Phase2 => 1.25, Self::Phase3 => 1.5, Self::FinalStand => 1.75, Self::Enraged => 2.5 }
+    }
+    pub fn speed_multiplier(&self) -> f32 {
+        match self { Self::Phase1 => 1.0, Self::Phase2 => 1.15, Self::Phase3 => 1.3, Self::FinalStand => 1.5, Self::Enraged => 2.0 }
+    }
+    pub fn defense_modifier(&self) -> f32 {
+        match self { Self::Phase1 => 1.0, Self::Phase2 => 0.95, Self::Phase3 => 0.85, Self::FinalStand => 0.75, Self::Enraged => 0.5 }
+    }
+    pub fn name(&self) -> &'static str {
+        match self { Self::Phase1 => "Phase 1", Self::Phase2 => "Phase 2 - Awakened", Self::Phase3 => "Phase 3 - Desperate", Self::FinalStand => "Final Stand", Self::Enraged => "ENRAGED" }
+    }
+}
+
+/// Special attacks that bosses can use
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum BossSpecialAttack {
+    GoblinWarCry, TreasureThrow, CrownSlam, RoyalGuardSummon, GoldenShield,
+    BerserkerRage, AxeCleave, WarDrumSummon, IntimidatingRoar, BloodFrenzy,
+    BloodDrain, BatSwarm, NightmareGaze, CoffinTeleport, BloodMoon,
+    EntangleRoots, NatureSWrath, SummonTreeants, PhotosynthesisHeal, PoisonSporeCloud, ThornShield,
+    FrostBreath, IcicleBarrage, FrozenTomb, BlizzardStorm, GlacialWings, CrystallineArmor, AbsoluteZero,
+    HellfireRain, ShadowStep, SoulReap, DemonicSummon, VoidRift, CorruptionWave, Armageddon, DarkPact,
+}
+
+impl BossSpecialAttack {
+    pub fn cooldown(&self) -> u32 {
+        match self {
+            Self::TreasureThrow | Self::AxeCleave | Self::ShadowStep => 3, Self::BloodDrain | Self::FrostBreath | Self::IcicleBarrage => 4,
+            Self::CrownSlam | Self::EntangleRoots | Self::HellfireRain => 5, Self::BatSwarm | Self::PoisonSporeCloud | Self::VoidRift => 6,
+            Self::NatureSWrath | Self::CorruptionWave => 7, Self::GoblinWarCry | Self::IntimidatingRoar | Self::NightmareGaze | Self::PhotosynthesisHeal | Self::GlacialWings | Self::SoulReap => 8,
+            Self::BerserkerRage | Self::CoffinTeleport | Self::FrozenTomb | Self::DemonicSummon => 10, Self::RoyalGuardSummon | Self::BloodFrenzy | Self::SummonTreeants | Self::CrystallineArmor | Self::DarkPact => 12,
+            Self::GoldenShield | Self::WarDrumSummon | Self::BlizzardStorm => 15, Self::BloodMoon => 20, Self::AbsoluteZero => 25, Self::Armageddon => 30, _ => 5,
+        }
+    }
+    pub fn base_damage(&self) -> i32 {
+        match self {
+            Self::GoblinWarCry | Self::RoyalGuardSummon | Self::GoldenShield | Self::BerserkerRage | Self::WarDrumSummon | Self::IntimidatingRoar | Self::BloodFrenzy | Self::CoffinTeleport | Self::SummonTreeants | Self::PhotosynthesisHeal | Self::ThornShield | Self::GlacialWings | Self::CrystallineArmor | Self::DemonicSummon | Self::DarkPact | Self::SoulReap => 0,
+            Self::TreasureThrow | Self::EntangleRoots | Self::BatSwarm => 15, Self::NightmareGaze | Self::PoisonSporeCloud => 25, Self::BloodDrain | Self::FrozenTomb => 30, Self::CrownSlam | Self::CorruptionWave => 35, Self::IcicleBarrage | Self::VoidRift => 40,
+            Self::AxeCleave | Self::BlizzardStorm => 45, Self::BloodMoon | Self::ShadowStep => 50, Self::FrostBreath => 55, Self::NatureSWrath => 60, Self::HellfireRain => 70, Self::AbsoluteZero => 100, Self::Armageddon => 150,
+        }
+    }
+    pub fn aoe_radius(&self) -> u32 {
+        match self { Self::CrownSlam | Self::EntangleRoots | Self::VoidRift => 2, Self::AxeCleave | Self::PoisonSporeCloud => 3, Self::BatSwarm | Self::FrostBreath => 4, Self::HellfireRain => 5, Self::NatureSWrath | Self::CorruptionWave => 6, Self::BloodMoon => 8, Self::BlizzardStorm => 10, Self::Armageddon => 12, Self::AbsoluteZero => 15, _ => 0 }
+    }
+    pub fn inflicts_status(&self) -> Option<(StatusEffect, u32)> {
+        match self { Self::FrostBreath | Self::IcicleBarrage => Some((StatusEffect::Freeze, 2)), Self::EntangleRoots | Self::NightmareGaze => Some((StatusEffect::Stun, 2)), Self::IntimidatingRoar => Some((StatusEffect::Weakness, 4)), Self::HellfireRain => Some((StatusEffect::Burn, 4)), Self::BlizzardStorm => Some((StatusEffect::Freeze, 4)), Self::FrozenTomb => Some((StatusEffect::Freeze, 5)), Self::PoisonSporeCloud => Some((StatusEffect::Poison, 5)), Self::CorruptionWave => Some((StatusEffect::Poison, 6)), Self::AbsoluteZero => Some((StatusEffect::Freeze, 8)), _ => None }
+    }
+    pub fn name(&self) -> &'static str {
+        match self { Self::GoblinWarCry => "Goblin War Cry", Self::TreasureThrow => "Treasure Throw", Self::CrownSlam => "Crown Slam", Self::RoyalGuardSummon => "Royal Guard Summon", Self::GoldenShield => "Golden Shield", Self::BerserkerRage => "Berserker Rage", Self::AxeCleave => "Axe Cleave", Self::WarDrumSummon => "War Drum Summon", Self::IntimidatingRoar => "Intimidating Roar", Self::BloodFrenzy => "Blood Frenzy", Self::BloodDrain => "Blood Drain", Self::BatSwarm => "Bat Swarm", Self::NightmareGaze => "Nightmare Gaze", Self::CoffinTeleport => "Coffin Teleport", Self::BloodMoon => "Blood Moon", Self::EntangleRoots => "Entangling Roots", Self::NatureSWrath => "Nature's Wrath", Self::SummonTreeants => "Summon Treants", Self::PhotosynthesisHeal => "Photosynthesis", Self::PoisonSporeCloud => "Poison Spore Cloud", Self::ThornShield => "Thorn Shield", Self::FrostBreath => "Frost Breath", Self::IcicleBarrage => "Icicle Barrage", Self::FrozenTomb => "Frozen Tomb", Self::BlizzardStorm => "Blizzard Storm", Self::GlacialWings => "Glacial Wings", Self::CrystallineArmor => "Crystalline Armor", Self::AbsoluteZero => "ABSOLUTE ZERO", Self::HellfireRain => "Hellfire Rain", Self::ShadowStep => "Shadow Step", Self::SoulReap => "Soul Reap", Self::DemonicSummon => "Demonic Summon", Self::VoidRift => "Void Rift", Self::CorruptionWave => "Corruption Wave", Self::Armageddon => "ARMAGEDDON", Self::DarkPact => "Dark Pact" }
+    }
+}
+
+/// Arena mechanics that affect the battlefield during boss fights
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum ArenaMechanic { LavaPools, IcePatches, PoisonGas, ElectricFloor, VoidZones, SpikeTrap, CrumblingFloor, SlowField, WindTunnel, TeleportPad, Quicksand, TreasurePiles, BloodAltars, FrozenPillars, DemonicPortals, AncientRunes, ShadowRealm, NaturesGrasp, CeilingCollapse, FloodingWater, DarknessWave, EarthquakeTremor }
+
+impl ArenaMechanic {
+    pub fn damage_per_tick(&self) -> i32 { match self { Self::LavaPools => 15, Self::IcePatches => 5, Self::PoisonGas => 8, Self::ElectricFloor => 12, Self::VoidZones => 50, Self::SpikeTrap => 25, Self::CrumblingFloor => 20, Self::Quicksand => 10, Self::CeilingCollapse => 30, Self::FloodingWater => 5, Self::EarthquakeTremor => 15, _ => 0 } }
+    pub fn glyph(&self) -> char { match self { Self::LavaPools | Self::FloodingWater => '~', Self::IcePatches => '=', Self::PoisonGas | Self::AncientRunes => '*', Self::ElectricFloor | Self::EarthquakeTremor => '#', Self::VoidZones => '@', Self::SpikeTrap => '^', Self::CrumblingFloor => '.', Self::SlowField => '%', Self::WindTunnel => '>', Self::TeleportPad => 'O', Self::Quicksand => ',', Self::TreasurePiles => '$', Self::BloodAltars => '+', Self::FrozenPillars => 'I', Self::DemonicPortals => '0', Self::NaturesGrasp => '&', Self::CeilingCollapse => '!', Self::ShadowRealm | Self::DarknessWave => ' ' } }
+    pub fn name(&self) -> &'static str { match self { Self::LavaPools => "Lava Pool", Self::IcePatches => "Ice Patch", Self::PoisonGas => "Poison Gas", Self::ElectricFloor => "Electric Floor", Self::VoidZones => "Void Zone", Self::SpikeTrap => "Spike Trap", Self::CrumblingFloor => "Crumbling Floor", Self::SlowField => "Slow Field", Self::WindTunnel => "Wind Tunnel", Self::TeleportPad => "Teleport Pad", Self::Quicksand => "Quicksand", Self::TreasurePiles => "Treasure Pile", Self::BloodAltars => "Blood Altar", Self::FrozenPillars => "Frozen Pillar", Self::DemonicPortals => "Demonic Portal", Self::AncientRunes => "Ancient Rune", Self::ShadowRealm => "Shadow Realm", Self::NaturesGrasp => "Nature's Grasp", Self::CeilingCollapse => "Falling Debris", Self::FloodingWater => "Flooding Water", Self::DarknessWave => "Darkness Wave", Self::EarthquakeTremor => "Earthquake" } }
+}
+
+/// Active arena hazard on the map
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ArenaHazard { pub x: usize, pub y: usize, pub mechanic: ArenaMechanic, pub duration: Option<u32>, pub radius: u32, pub active: bool }
+
+impl ArenaHazard {
+    pub fn new(x: usize, y: usize, mechanic: ArenaMechanic, duration: Option<u32>, radius: u32) -> Self { Self { x, y, mechanic, duration, radius, active: true } }
+    pub fn contains(&self, px: usize, py: usize) -> bool { if !self.active { return false; } let dx = (px as i32 - self.x as i32).abs() as u32; let dy = (py as i32 - self.y as i32).abs() as u32; dx <= self.radius && dy <= self.radius }
+    pub fn tick(&mut self) -> bool { if let Some(ref mut dur) = self.duration { *dur = dur.saturating_sub(1); if *dur == 0 { self.active = false; } } self.active }
+}
+
+/// Pattern for spawning minions
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum SpawnPattern { AroundBoss, AroundPlayer, ArenaEdges, AtPortals, Random, LineFormation, CircleFormation }
+
+/// A wave of minions that a boss can summon
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MinionWave { pub minion_types: Vec<EnemyKind>, pub count: u32, pub spawn_delay: u32, pub spawn_pattern: SpawnPattern, pub buff_on_spawn: Option<StatusEffect> }
+
+impl MinionWave {
+    pub fn new(minion_types: Vec<EnemyKind>, count: u32, pattern: SpawnPattern) -> Self { Self { minion_types, count, spawn_delay: 0, spawn_pattern: pattern, buff_on_spawn: None } }
+    pub fn with_buff(mut self, buff: StatusEffect) -> Self { self.buff_on_spawn = Some(buff); self }
+}
+
+/// Returns minion waves for a boss based on phase
+pub fn get_boss_minion_waves(boss: EnemyKind, phase: BossPhase) -> Vec<MinionWave> {
+    match boss {
+        EnemyKind::BossGoblinKing => match phase { BossPhase::Phase1 => vec![MinionWave::new(vec![EnemyKind::Goblin], 3, SpawnPattern::AroundBoss)], BossPhase::Phase2 => vec![MinionWave::new(vec![EnemyKind::Goblin, EnemyKind::Hobgoblin], 4, SpawnPattern::ArenaEdges)], _ => vec![MinionWave::new(vec![EnemyKind::Hobgoblin], 5, SpawnPattern::CircleFormation).with_buff(StatusEffect::Haste)] },
+        EnemyKind::BossOrcWarlord => match phase { BossPhase::Phase1 => vec![MinionWave::new(vec![EnemyKind::Orc], 2, SpawnPattern::AroundBoss)], BossPhase::Phase2 => vec![MinionWave::new(vec![EnemyKind::Orc, EnemyKind::OrcBerserker], 3, SpawnPattern::LineFormation)], _ => vec![MinionWave::new(vec![EnemyKind::OrcBerserker], 3, SpawnPattern::ArenaEdges).with_buff(StatusEffect::Strength)] },
+        EnemyKind::BossVampireLord => match phase { BossPhase::Phase1 => vec![MinionWave::new(vec![EnemyKind::Bat], 5, SpawnPattern::CircleFormation)], BossPhase::Phase2 => vec![MinionWave::new(vec![EnemyKind::Vampire], 2, SpawnPattern::AtPortals)], _ => vec![MinionWave::new(vec![EnemyKind::VampireElite], 2, SpawnPattern::AroundBoss).with_buff(StatusEffect::Regeneration)] },
+        EnemyKind::BossForestGuardian => match phase { BossPhase::Phase1 => vec![MinionWave::new(vec![EnemyKind::Wolf], 4, SpawnPattern::ArenaEdges)], BossPhase::Phase2 => vec![MinionWave::new(vec![EnemyKind::TreeEnt], 2, SpawnPattern::AroundBoss)], _ => vec![MinionWave::new(vec![EnemyKind::ForestTroll], 2, SpawnPattern::LineFormation)] },
+        EnemyKind::BossIceDragon => match phase { BossPhase::Phase1 => vec![MinionWave::new(vec![EnemyKind::IceElemental], 2, SpawnPattern::ArenaEdges)], BossPhase::Phase2 => vec![MinionWave::new(vec![EnemyKind::FrostWolf], 4, SpawnPattern::CircleFormation)], _ => vec![MinionWave::new(vec![EnemyKind::FrostGiant], 2, SpawnPattern::ArenaEdges)] },
+        EnemyKind::BossDemonKing => match phase { BossPhase::Phase1 => vec![MinionWave::new(vec![EnemyKind::InfernalImp], 4, SpawnPattern::AtPortals)], BossPhase::Phase2 => vec![MinionWave::new(vec![EnemyKind::Demon], 3, SpawnPattern::CircleFormation)], BossPhase::Phase3 => vec![MinionWave::new(vec![EnemyKind::DemonLord], 2, SpawnPattern::AtPortals).with_buff(StatusEffect::Strength)], _ => vec![MinionWave::new(vec![EnemyKind::Balrog], 1, SpawnPattern::AroundBoss).with_buff(StatusEffect::Shield)] },
+        _ => vec![],
+    }
+}
+
+/// Rarity tier for loot items
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum LootRarity { Common, Uncommon, Rare, Epic, Legendary, Mythic }
+
+impl LootRarity {
+    pub fn color_index(&self) -> u8 { match self { Self::Common => 2, Self::Uncommon => 5, Self::Rare => 7, Self::Epic => 13, Self::Legendary => 11, Self::Mythic => 3 } }
+    pub fn stat_multiplier(&self) -> f32 { match self { Self::Common => 1.0, Self::Uncommon => 1.25, Self::Rare => 1.5, Self::Epic => 2.0, Self::Legendary => 2.5, Self::Mythic => 3.5 } }
+}
+
+/// Special effects that boss loot can have
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum BossLootEffect { GoldMagnet, TreasureHunter, GoblinBane, Berserking, Cleaving, WarCry, BloodThirst, NightStalker, Undying, NaturesBlessing, Entangling, PhotosynthesisArmor, FrostAura, IceShield, Shatter, Hellfire, SoulHarvest, DemonicPact, VoidWalker, Apocalypse }
+
+impl BossLootEffect {
+    pub fn name(&self) -> &'static str { match self { Self::GoldMagnet => "Gold Magnet", Self::TreasureHunter => "Treasure Hunter", Self::GoblinBane => "Goblin Bane", Self::Berserking => "Berserking", Self::Cleaving => "Cleaving", Self::WarCry => "War Cry", Self::BloodThirst => "Blood Thirst", Self::NightStalker => "Night Stalker", Self::Undying => "Undying", Self::NaturesBlessing => "Nature's Blessing", Self::Entangling => "Entangling", Self::PhotosynthesisArmor => "Photosynthesis", Self::FrostAura => "Frost Aura", Self::IceShield => "Ice Shield", Self::Shatter => "Shatter", Self::Hellfire => "Hellfire", Self::SoulHarvest => "Soul Harvest", Self::DemonicPact => "Demonic Pact", Self::VoidWalker => "Void Walker", Self::Apocalypse => "Apocalypse" } }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum BossLootType { Weapon, Armor, Accessory, Consumable, Material, Artifact }
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BossLootStats { pub attack_bonus: i32, pub defense_bonus: i32, pub hp_bonus: i32, pub mp_bonus: i32, pub speed_bonus: i32, pub crit_chance: f32, pub lifesteal: f32 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BossLoot { pub name: String, pub description: String, pub rarity: LootRarity, pub loot_type: BossLootType, pub stats: BossLootStats, pub special_effect: Option<BossLootEffect>, pub drop_chance: f32 }
+
+/// Returns unique loot table for a boss
+pub fn get_boss_loot_table(boss: EnemyKind) -> Vec<BossLoot> {
+    match boss {
+        EnemyKind::BossGoblinKing => vec![
+            BossLoot { name: "Crown of the Goblin King".into(), description: "Goblins cower before its wearer.".into(), rarity: LootRarity::Legendary, loot_type: BossLootType::Accessory, stats: BossLootStats { defense_bonus: 5, hp_bonus: 20, ..Default::default() }, special_effect: Some(BossLootEffect::GoblinBane), drop_chance: 0.25 },
+            BossLoot { name: "Gilded Scepter".into(), description: "Draws wealth to its wielder.".into(), rarity: LootRarity::Epic, loot_type: BossLootType::Weapon, stats: BossLootStats { attack_bonus: 15, crit_chance: 0.1, ..Default::default() }, special_effect: Some(BossLootEffect::GoldMagnet), drop_chance: 0.35 },
+        ],
+        EnemyKind::BossOrcWarlord => vec![
+            BossLoot { name: "Warlord's Greataxe".into(), description: "Soaked in the blood of warriors.".into(), rarity: LootRarity::Legendary, loot_type: BossLootType::Weapon, stats: BossLootStats { attack_bonus: 35, crit_chance: 0.15, ..Default::default() }, special_effect: Some(BossLootEffect::Cleaving), drop_chance: 0.25 },
+            BossLoot { name: "Berserker's Helm".into(), description: "Pain only makes you stronger.".into(), rarity: LootRarity::Epic, loot_type: BossLootType::Armor, stats: BossLootStats { defense_bonus: 10, hp_bonus: 30, ..Default::default() }, special_effect: Some(BossLootEffect::Berserking), drop_chance: 0.35 },
+        ],
+        EnemyKind::BossVampireLord => vec![
+            BossLoot { name: "Crimson Fang".into(), description: "Drinks the blood of its victims.".into(), rarity: LootRarity::Legendary, loot_type: BossLootType::Weapon, stats: BossLootStats { attack_bonus: 28, lifesteal: 0.2, ..Default::default() }, special_effect: Some(BossLootEffect::BloodThirst), drop_chance: 0.25 },
+            BossLoot { name: "Phylactery of Undeath".into(), description: "Contains immortal essence.".into(), rarity: LootRarity::Mythic, loot_type: BossLootType::Artifact, stats: BossLootStats { hp_bonus: 50, ..Default::default() }, special_effect: Some(BossLootEffect::Undying), drop_chance: 0.1 },
+        ],
+        EnemyKind::BossForestGuardian => vec![
+            BossLoot { name: "Staff of the Ancient Grove".into(), description: "From the World Tree heartwood.".into(), rarity: LootRarity::Legendary, loot_type: BossLootType::Weapon, stats: BossLootStats { attack_bonus: 25, mp_bonus: 40, ..Default::default() }, special_effect: Some(BossLootEffect::Entangling), drop_chance: 0.25 },
+            BossLoot { name: "Seed of Life".into(), description: "Contains nature's vitality essence.".into(), rarity: LootRarity::Mythic, loot_type: BossLootType::Artifact, stats: BossLootStats { hp_bonus: 100, ..Default::default() }, special_effect: Some(BossLootEffect::NaturesBlessing), drop_chance: 0.1 },
+        ],
+        EnemyKind::BossIceDragon => vec![
+            BossLoot { name: "Frostfang, Blade of the Dragon".into(), description: "Forged from dragon's tooth.".into(), rarity: LootRarity::Mythic, loot_type: BossLootType::Weapon, stats: BossLootStats { attack_bonus: 45, crit_chance: 0.2, ..Default::default() }, special_effect: Some(BossLootEffect::Shatter), drop_chance: 0.15 },
+            BossLoot { name: "Heart of the Glacier".into(), description: "Pulsing with cold energy.".into(), rarity: LootRarity::Mythic, loot_type: BossLootType::Artifact, stats: BossLootStats { mp_bonus: 60, ..Default::default() }, special_effect: Some(BossLootEffect::IceShield), drop_chance: 0.1 },
+        ],
+        EnemyKind::BossDemonKing => vec![
+            BossLoot { name: "Infernal Crown of Domination".into(), description: "Power nearly incomprehensible.".into(), rarity: LootRarity::Mythic, loot_type: BossLootType::Accessory, stats: BossLootStats { attack_bonus: 30, defense_bonus: 20, hp_bonus: 50, mp_bonus: 50, crit_chance: 0.15, ..Default::default() }, special_effect: Some(BossLootEffect::SoulHarvest), drop_chance: 0.1 },
+            BossLoot { name: "Apocalypse, Blade of Endings".into(), description: "Each kill brings the end closer.".into(), rarity: LootRarity::Mythic, loot_type: BossLootType::Weapon, stats: BossLootStats { attack_bonus: 60, crit_chance: 0.25, ..Default::default() }, special_effect: Some(BossLootEffect::Apocalypse), drop_chance: 0.1 },
+            BossLoot { name: "Void Walker's Boots".into(), description: "Step between dimensions.".into(), rarity: LootRarity::Legendary, loot_type: BossLootType::Armor, stats: BossLootStats { speed_bonus: 5, defense_bonus: 15, ..Default::default() }, special_effect: Some(BossLootEffect::VoidWalker), drop_chance: 0.15 },
+        ],
+        _ => vec![],
+    }
+}
+
+/// Events that occur during a boss fight
+#[derive(Clone, Debug)]
+pub enum BossFightEvent { PhaseTransition(BossPhase), SpecialAttack(BossSpecialAttack), MinionSpawn(MinionWave), ArenaHazardSpawn(ArenaHazard), InvulnerabilityEnded, RageAbility, Dialogue(String), BossDefeated }
+
+/// Manages the complete state of a boss encounter
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BossFight {
+    pub boss_kind: EnemyKind, pub phase: BossPhase, pub turn_count: u32, pub enrage_timer: u32,
+    pub attack_cooldowns: HashMap<BossSpecialAttack, u32>, pub arena_hazards: Vec<ArenaHazard>,
+    pub pending_waves: Vec<MinionWave>, pub active_minion_count: u32, pub max_minions: u32,
+    pub is_invulnerable: bool, pub invuln_duration: u32, pub rage: u32, pub max_rage: u32,
+    pub phase_thresholds: Vec<f32>, pub intro_complete: bool,
+}
+
+impl BossFight {
+    pub fn new(boss_kind: EnemyKind) -> Self {
+        let (enrage_timer, max_minions, max_rage, phase_thresholds) = match boss_kind {
+            EnemyKind::BossGoblinKing => (100, 8, 50, vec![0.75, 0.50, 0.25]), EnemyKind::BossOrcWarlord => (120, 6, 75, vec![0.70, 0.45, 0.20]),
+            EnemyKind::BossVampireLord => (150, 10, 60, vec![0.65, 0.40, 0.15]), EnemyKind::BossForestGuardian => (140, 8, 80, vec![0.70, 0.40, 0.15]),
+            EnemyKind::BossIceDragon => (180, 6, 100, vec![0.75, 0.50, 0.25]), EnemyKind::BossDemonKing => (200, 12, 150, vec![0.80, 0.60, 0.40, 0.20]),
+            _ => (100, 5, 50, vec![0.75, 0.50, 0.25]),
+        };
+        Self { boss_kind, phase: BossPhase::Phase1, turn_count: 0, enrage_timer, attack_cooldowns: HashMap::new(), arena_hazards: Vec::new(), pending_waves: Vec::new(), active_minion_count: 0, max_minions, is_invulnerable: false, invuln_duration: 0, rage: 0, max_rage, phase_thresholds, intro_complete: false }
+    }
+
+    pub fn get_available_attacks(&self) -> Vec<BossSpecialAttack> { Self::get_boss_attacks(self.boss_kind, self.phase).into_iter().filter(|atk| self.attack_cooldowns.get(atk).map_or(true, |&cd| cd == 0)).collect() }
+
+    fn get_boss_attacks(boss: EnemyKind, phase: BossPhase) -> Vec<BossSpecialAttack> {
+        match boss {
+            EnemyKind::BossGoblinKing => match phase { BossPhase::Phase1 => vec![BossSpecialAttack::TreasureThrow, BossSpecialAttack::GoblinWarCry], BossPhase::Phase2 => vec![BossSpecialAttack::TreasureThrow, BossSpecialAttack::GoblinWarCry, BossSpecialAttack::CrownSlam, BossSpecialAttack::RoyalGuardSummon], _ => vec![BossSpecialAttack::TreasureThrow, BossSpecialAttack::CrownSlam, BossSpecialAttack::RoyalGuardSummon, BossSpecialAttack::GoldenShield] },
+            EnemyKind::BossOrcWarlord => match phase { BossPhase::Phase1 => vec![BossSpecialAttack::AxeCleave, BossSpecialAttack::IntimidatingRoar], BossPhase::Phase2 => vec![BossSpecialAttack::AxeCleave, BossSpecialAttack::IntimidatingRoar, BossSpecialAttack::BerserkerRage], _ => vec![BossSpecialAttack::AxeCleave, BossSpecialAttack::BerserkerRage, BossSpecialAttack::WarDrumSummon, BossSpecialAttack::BloodFrenzy] },
+            EnemyKind::BossVampireLord => match phase { BossPhase::Phase1 => vec![BossSpecialAttack::BloodDrain, BossSpecialAttack::BatSwarm], BossPhase::Phase2 => vec![BossSpecialAttack::BloodDrain, BossSpecialAttack::BatSwarm, BossSpecialAttack::NightmareGaze, BossSpecialAttack::CoffinTeleport], _ => vec![BossSpecialAttack::BloodDrain, BossSpecialAttack::NightmareGaze, BossSpecialAttack::CoffinTeleport, BossSpecialAttack::BloodMoon] },
+            EnemyKind::BossForestGuardian => match phase { BossPhase::Phase1 => vec![BossSpecialAttack::EntangleRoots, BossSpecialAttack::PoisonSporeCloud], BossPhase::Phase2 => vec![BossSpecialAttack::EntangleRoots, BossSpecialAttack::PoisonSporeCloud, BossSpecialAttack::SummonTreeants, BossSpecialAttack::ThornShield], _ => vec![BossSpecialAttack::EntangleRoots, BossSpecialAttack::SummonTreeants, BossSpecialAttack::NatureSWrath, BossSpecialAttack::PhotosynthesisHeal] },
+            EnemyKind::BossIceDragon => match phase { BossPhase::Phase1 => vec![BossSpecialAttack::FrostBreath, BossSpecialAttack::IcicleBarrage], BossPhase::Phase2 => vec![BossSpecialAttack::FrostBreath, BossSpecialAttack::IcicleBarrage, BossSpecialAttack::GlacialWings, BossSpecialAttack::FrozenTomb], BossPhase::Phase3 => vec![BossSpecialAttack::FrostBreath, BossSpecialAttack::FrozenTomb, BossSpecialAttack::BlizzardStorm, BossSpecialAttack::CrystallineArmor], _ => vec![BossSpecialAttack::FrostBreath, BossSpecialAttack::BlizzardStorm, BossSpecialAttack::CrystallineArmor, BossSpecialAttack::AbsoluteZero] },
+            EnemyKind::BossDemonKing => match phase { BossPhase::Phase1 => vec![BossSpecialAttack::HellfireRain, BossSpecialAttack::ShadowStep], BossPhase::Phase2 => vec![BossSpecialAttack::HellfireRain, BossSpecialAttack::ShadowStep, BossSpecialAttack::VoidRift, BossSpecialAttack::DemonicSummon], BossPhase::Phase3 => vec![BossSpecialAttack::HellfireRain, BossSpecialAttack::VoidRift, BossSpecialAttack::DemonicSummon, BossSpecialAttack::SoulReap, BossSpecialAttack::CorruptionWave], _ => vec![BossSpecialAttack::HellfireRain, BossSpecialAttack::SoulReap, BossSpecialAttack::CorruptionWave, BossSpecialAttack::DarkPact, BossSpecialAttack::Armageddon] },
+            _ => vec![],
+        }
+    }
+
+    pub fn check_phase_transition(&mut self, current_hp_percent: f32) -> Option<BossPhase> {
+        let new_phase = match self.phase { BossPhase::Phase1 if self.phase_thresholds.first().map_or(false, |&t| current_hp_percent <= t) => Some(BossPhase::Phase2), BossPhase::Phase2 if self.phase_thresholds.get(1).map_or(false, |&t| current_hp_percent <= t) => Some(BossPhase::Phase3), BossPhase::Phase3 if self.phase_thresholds.get(2).map_or(false, |&t| current_hp_percent <= t) => Some(BossPhase::FinalStand), _ => None };
+        if let Some(phase) = new_phase { self.phase = phase; self.attack_cooldowns.clear(); self.is_invulnerable = true; self.invuln_duration = 2; self.pending_waves = get_boss_minion_waves(self.boss_kind, self.phase); }
+        new_phase
+    }
+
+    pub fn tick(&mut self, rng: &mut impl Rng) -> Vec<BossFightEvent> {
+        let mut events = Vec::new(); self.turn_count += 1;
+        if self.turn_count >= self.enrage_timer && self.phase != BossPhase::Enraged { self.phase = BossPhase::Enraged; events.push(BossFightEvent::PhaseTransition(BossPhase::Enraged)); }
+        if self.is_invulnerable { self.invuln_duration = self.invuln_duration.saturating_sub(1); if self.invuln_duration == 0 { self.is_invulnerable = false; events.push(BossFightEvent::InvulnerabilityEnded); } }
+        for cooldown in self.attack_cooldowns.values_mut() { *cooldown = cooldown.saturating_sub(1); }
+        self.arena_hazards.retain_mut(|hazard| hazard.tick());
+        let available = self.get_available_attacks();
+        if !available.is_empty() { let attack = available[rng.gen_range(0..available.len())]; self.attack_cooldowns.insert(attack, attack.cooldown()); events.push(BossFightEvent::SpecialAttack(attack)); }
+        if !self.pending_waves.is_empty() && self.active_minion_count < self.max_minions { if self.pending_waves.first().map_or(false, |w| w.spawn_delay == 0) { events.push(BossFightEvent::MinionSpawn(self.pending_waves.remove(0))); } }
+        for wave in &mut self.pending_waves { wave.spawn_delay = wave.spawn_delay.saturating_sub(1); }
+        events
+    }
+
+    pub fn on_damage(&mut self, damage: i32, current_hp_percent: f32) -> Vec<BossFightEvent> {
+        let mut events = Vec::new(); self.rage += damage as u32;
+        if self.rage >= self.max_rage { self.rage = 0; events.push(BossFightEvent::RageAbility); }
+        if let Some(phase) = self.check_phase_transition(current_hp_percent) { events.push(BossFightEvent::PhaseTransition(phase)); }
+        events
+    }
+
+    pub fn roll_loot(&self, rng: &mut impl Rng) -> Vec<BossLoot> {
+        let loot_table = get_boss_loot_table(self.boss_kind);
+        let mut drops: Vec<BossLoot> = loot_table.iter().filter(|item| rng.gen::<f32>() < item.drop_chance).cloned().collect();
+        if drops.is_empty() && !loot_table.is_empty() { drops.push(loot_table[rng.gen_range(0..loot_table.len())].clone()); }
+        drops
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

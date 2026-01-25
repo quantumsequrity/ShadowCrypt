@@ -1660,18 +1660,18 @@ fn render_minimap(state: &GameState) -> std::io::Result<()> {
 // ============================================================================
 
 fn render(state: &GameState) -> std::io::Result<()> {
-    render_full(state, None, None)
+    render_full(state, None, None, None)
 }
 
 fn render_with_movement(state: &GameState, movement: Option<&MovementState>) -> std::io::Result<()> {
-    render_full(state, movement, None)
+    render_full(state, movement, None, None)
 }
 
 fn render_with_targeting(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>) -> std::io::Result<()> {
-    render_full(state, movement, targeting)
+    render_full(state, movement, targeting, None)
 }
 
-fn render_full(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>) -> std::io::Result<()> {
+fn render_full(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>, msg_log: Option<&MessageLog>) -> std::io::Result<()> {
     let mut stdout = stdout();
     execute!(stdout, MoveTo(0, 0))?;
 
@@ -2092,155 +2092,703 @@ fn render_target_info(stdout: &mut std::io::Stdout, targeting: &TargetingState) 
     Ok(())
 }
 
+// ============================================================================
+// ENHANCED INVENTORY UI
+// ============================================================================
+
+/// Sorting options for inventory items
+#[derive(Clone, Copy, PartialEq)]
+enum InventorySortMode {
+    Default,
+    ByType,
+    ByRarity,
+    ByName,
+}
+
+impl InventorySortMode {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::ByType => "Type",
+            Self::ByRarity => "Rarity",
+            Self::ByName => "Name",
+        }
+    }
+
+    fn next(&self) -> Self {
+        match self {
+            Self::Default => Self::ByType,
+            Self::ByType => Self::ByRarity,
+            Self::ByRarity => Self::ByName,
+            Self::ByName => Self::Default,
+        }
+    }
+}
+
+/// State for the enhanced inventory UI
+struct InventoryUIState {
+    selected_index: usize,
+    sort_mode: InventorySortMode,
+    scroll_offset: usize,
+}
+
+impl InventoryUIState {
+    fn new() -> Self {
+        Self {
+            selected_index: 0,
+            sort_mode: InventorySortMode::Default,
+            scroll_offset: 0,
+        }
+    }
+
+    fn move_selection(&mut self, delta: i32, max_items: usize) {
+        if max_items == 0 {
+            self.selected_index = 0;
+            return;
+        }
+        let new_index = (self.selected_index as i32 + delta).rem_euclid(max_items as i32) as usize;
+        self.selected_index = new_index;
+        let visible_items = 8;
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        } else if self.selected_index >= self.scroll_offset + visible_items {
+            self.scroll_offset = self.selected_index - visible_items + 1;
+        }
+    }
+
+    fn cycle_sort(&mut self) {
+        self.sort_mode = self.sort_mode.next();
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+}
+
+thread_local! {
+    static INVENTORY_UI: std::cell::RefCell<InventoryUIState> = std::cell::RefCell::new(InventoryUIState::new());
+}
+
+fn item_type_category(kind: &ItemKind) -> u8 {
+    if let Some(slot) = kind.equip_slot() {
+        match slot {
+            EquipSlot::Weapon => 0,
+            EquipSlot::Armor => 1,
+            EquipSlot::Shield => 2,
+            EquipSlot::Helmet => 3,
+            EquipSlot::Gloves => 4,
+            EquipSlot::Boots => 5,
+            EquipSlot::Ring => 6,
+            EquipSlot::Amulet => 7,
+        }
+    } else if kind.is_consumable() {
+        if kind.is_food() { 9 } else { 8 }
+    } else {
+        10
+    }
+}
+
+fn get_sorted_indices(inventory: &[Item], sort_mode: InventorySortMode) -> Vec<usize> {
+    let mut indices: Vec<usize> = (0..inventory.len()).collect();
+    match sort_mode {
+        InventorySortMode::Default => {}
+        InventorySortMode::ByType => {
+            indices.sort_by(|&a, &b| {
+                let cat_a = item_type_category(&inventory[a].kind);
+                let cat_b = item_type_category(&inventory[b].kind);
+                cat_a.cmp(&cat_b).then_with(|| inventory[a].kind.name().cmp(inventory[b].kind.name()))
+            });
+        }
+        InventorySortMode::ByRarity => {
+            indices.sort_by(|&a, &b| {
+                inventory[b].rarity.partial_cmp(&inventory[a].rarity)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| inventory[a].kind.name().cmp(inventory[b].kind.name()))
+            });
+        }
+        InventorySortMode::ByName => {
+            indices.sort_by(|&a, &b| {
+                inventory[a].kind.name().cmp(inventory[b].kind.name())
+            });
+        }
+    }
+    indices
+}
+
+fn item_type_indicator(kind: &ItemKind) -> &'static str {
+    if let Some(slot) = kind.equip_slot() {
+        match slot {
+            EquipSlot::Weapon => "[WPN]",
+            EquipSlot::Armor => "[ARM]",
+            EquipSlot::Shield => "[SHL]",
+            EquipSlot::Helmet => "[HLM]",
+            EquipSlot::Gloves => "[GLV]",
+            EquipSlot::Boots => "[BTS]",
+            EquipSlot::Ring => "[RNG]",
+            EquipSlot::Amulet => "[AMU]",
+        }
+    } else if kind.is_food() {
+        "[FOOD]"
+    } else if kind.is_consumable() {
+        "[USE]"
+    } else {
+        "[MISC]"
+    }
+}
+
+/// Handle inventory input - returns true if inventory should close
+pub fn handle_inventory_input(code: KeyCode, state: &mut GameState) -> bool {
+    INVENTORY_UI.with(|ui| {
+        let mut ui = ui.borrow_mut();
+        let inv_len = state.player.inventory.len();
+
+        match code {
+            KeyCode::Char('i') | KeyCode::Char('I') | KeyCode::Esc => return true,
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => ui.move_selection(-1, inv_len),
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => ui.move_selection(1, inv_len),
+            KeyCode::Char('s') | KeyCode::Char('S') => ui.cycle_sort(),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if inv_len > 0 {
+                    let sorted = get_sorted_indices(&state.player.inventory, ui.sort_mode);
+                    if ui.selected_index < sorted.len() {
+                        let real_idx = sorted[ui.selected_index];
+                        state.use_item(real_idx);
+                    }
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                if inv_len > 0 {
+                    let sorted = get_sorted_indices(&state.player.inventory, ui.sort_mode);
+                    if ui.selected_index < sorted.len() {
+                        let real_idx = sorted[ui.selected_index];
+                        state.drop_item(real_idx);
+                        if ui.selected_index >= state.player.inventory.len() && ui.selected_index > 0 {
+                            ui.selected_index -= 1;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                let idx = if c == '0' { 9 } else { (c as u8 - b'1') as usize };
+                if idx < inv_len {
+                    let sorted = get_sorted_indices(&state.player.inventory, ui.sort_mode);
+                    if idx < sorted.len() {
+                        let real_idx = sorted[idx];
+                        state.use_item(real_idx);
+                    }
+                }
+            }
+            _ => {}
+        }
+        false
+    })
+}
+
 fn render_inventory(state: &GameState) -> std::io::Result<()> {
     let mut stdout = stdout();
 
-    let start_x = 10;
-    let start_y = 5;
-    let width = 60;
-    let height = 30;
+    INVENTORY_UI.with(|ui| -> std::io::Result<()> {
+        let ui = ui.borrow();
+
+        let start_x: u16 = 5;
+        let start_y: u16 = 2;
+        let main_width: usize = 42;
+        let detail_width: usize = 32;
+        let height: u16 = 38;
+
+        // Draw main panel border
+        for y in start_y..(start_y + height) {
+            execute!(stdout, MoveTo(start_x, y))?;
+            if y == start_y || y == start_y + height - 1 {
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "{}", "=".repeat(main_width))?;
+            } else {
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "|{}|", " ".repeat(main_width - 2))?;
+            }
+        }
+
+        // Title
+        execute!(stdout, MoveTo(start_x + 2, start_y + 1))?;
+        execute!(stdout, SetForegroundColor(Color::Yellow), SetAttribute(Attribute::Bold))?;
+        write!(stdout, "INVENTORY")?;
+        execute!(stdout, SetAttribute(Attribute::Reset), SetForegroundColor(Color::White))?;
+        write!(stdout, " [{}/20]", state.player.inventory.len())?;
+
+        // Sort indicator
+        execute!(stdout, MoveTo(start_x + 22, start_y + 1))?;
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "Sort:{}", ui.sort_mode.name())?;
+
+        // Equipment section
+        execute!(stdout, MoveTo(start_x + 2, start_y + 3))?;
+        execute!(stdout, SetForegroundColor(Color::Cyan), SetAttribute(Attribute::Bold))?;
+        write!(stdout, "-- EQUIPPED --")?;
+        execute!(stdout, SetAttribute(Attribute::Reset))?;
+
+        let slots = [
+            (EquipSlot::Weapon, "WPN", "ATK"),
+            (EquipSlot::Armor,  "ARM", "DEF"),
+            (EquipSlot::Shield, "SHL", "DEF"),
+            (EquipSlot::Helmet, "HLM", "DEF"),
+            (EquipSlot::Gloves, "GLV", "ATK"),
+            (EquipSlot::Boots,  "BTS", "SPD"),
+            (EquipSlot::Ring,   "RNG", ""),
+            (EquipSlot::Amulet, "AMU", ""),
+        ];
+
+        for (i, (slot, name, stat_type)) in slots.iter().enumerate() {
+            execute!(stdout, MoveTo(start_x + 2, start_y + 4 + i as u16))?;
+            if let Some(item) = state.player.equipment.get(slot) {
+                execute!(stdout, SetForegroundColor(Color::Grey))?;
+                write!(stdout, "{}:", name)?;
+                execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)))?;
+                let item_name = format!("{}{}", item.rarity.prefix(), item.kind.name());
+                let trunc = if item_name.len() > 22 { format!("{}...", &item_name[..19]) } else { item_name };
+                write!(stdout, "{:<22}", trunc)?;
+                if !stat_type.is_empty() {
+                    let stat_val = match *stat_type {
+                        "ATK" => item.kind.attack_bonus(),
+                        "DEF" => item.kind.defense_bonus(),
+                        _ => 0,
+                    };
+                    if stat_val > 0 {
+                        execute!(stdout, SetForegroundColor(Color::Green))?;
+                        write!(stdout, "+{}", stat_val)?;
+                    }
+                }
+            } else {
+                execute!(stdout, SetForegroundColor(Color::Grey))?;
+                write!(stdout, "{}:", name)?;
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "(empty)")?;
+            }
+            execute!(stdout, ResetColor)?;
+        }
+
+        // Player stats
+        execute!(stdout, MoveTo(start_x + 2, start_y + 13))?;
+        execute!(stdout, SetForegroundColor(Color::White))?;
+        write!(stdout, "Stats: ")?;
+        execute!(stdout, SetForegroundColor(Color::Yellow))?;
+        write!(stdout, "ATK:{} ", state.player.total_attack())?;
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "DEF:{} ", state.player.total_defense())?;
+        execute!(stdout, SetForegroundColor(Color::Green))?;
+        write!(stdout, "HP:{}", state.player.total_max_hp())?;
+
+        // Items section
+        execute!(stdout, MoveTo(start_x + 2, start_y + 15))?;
+        execute!(stdout, SetForegroundColor(Color::Cyan), SetAttribute(Attribute::Bold))?;
+        write!(stdout, "-- ITEMS --")?;
+        execute!(stdout, SetAttribute(Attribute::Reset))?;
+
+        let sorted_indices = get_sorted_indices(&state.player.inventory, ui.sort_mode);
+        let visible_items = 8;
+        let scroll = ui.scroll_offset;
+
+        for (display_idx, &real_idx) in sorted_indices.iter().skip(scroll).take(visible_items).enumerate() {
+            let item = &state.player.inventory[real_idx];
+            let line_y = start_y + 16 + display_idx as u16;
+            let list_idx = scroll + display_idx;
+
+            execute!(stdout, MoveTo(start_x + 2, line_y))?;
+
+            if list_idx == ui.selected_index {
+                execute!(stdout, SetForegroundColor(Color::White), SetAttribute(Attribute::Bold))?;
+                write!(stdout, ">")?;
+                execute!(stdout, SetAttribute(Attribute::Reset))?;
+            } else {
+                write!(stdout, " ")?;
+            }
+
+            let key = if display_idx == 9 { '0' } else { (b'1' + display_idx as u8) as char };
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "[{}]", key)?;
+            execute!(stdout, SetForegroundColor(Color::Grey))?;
+            write!(stdout, "{}", item_type_indicator(&item.kind))?;
+            execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)))?;
+            let item_name = format!("{}{}", item.rarity.prefix(), item.kind.name());
+            let truncated = if item_name.len() > 18 { format!("{}...", &item_name[..15]) } else { item_name };
+            write!(stdout, "{}", truncated)?;
+            execute!(stdout, ResetColor)?;
+        }
+
+        // Scroll indicators
+        if scroll > 0 {
+            execute!(stdout, MoveTo(start_x + 38, start_y + 16), SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "^")?;
+        }
+        if scroll + visible_items < sorted_indices.len() {
+            execute!(stdout, MoveTo(start_x + 38, start_y + 23), SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "v")?;
+        }
+
+        // Detail panel
+        let detail_x = start_x + main_width as u16 + 1;
+
+        for y in start_y..(start_y + height) {
+            execute!(stdout, MoveTo(detail_x, y))?;
+            if y == start_y || y == start_y + height - 1 {
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "{}", "=".repeat(detail_width))?;
+            } else {
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "|{}|", " ".repeat(detail_width - 2))?;
+            }
+        }
+
+        execute!(stdout, MoveTo(detail_x + 2, start_y + 1))?;
+        execute!(stdout, SetForegroundColor(Color::Yellow), SetAttribute(Attribute::Bold))?;
+        write!(stdout, "ITEM DETAILS")?;
+        execute!(stdout, SetAttribute(Attribute::Reset))?;
+
+        if !sorted_indices.is_empty() && ui.selected_index < sorted_indices.len() {
+            let real_idx = sorted_indices[ui.selected_index];
+            let item = &state.player.inventory[real_idx];
+
+            execute!(stdout, MoveTo(detail_x + 2, start_y + 3))?;
+            execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)), SetAttribute(Attribute::Bold))?;
+            let full_name = format!("{}{}", item.rarity.prefix(), item.kind.name());
+            let name_trunc = if full_name.len() > detail_width - 4 { format!("{}...", &full_name[..(detail_width - 7)]) } else { full_name };
+            write!(stdout, "{}", name_trunc)?;
+            execute!(stdout, SetAttribute(Attribute::Reset))?;
+
+            execute!(stdout, MoveTo(detail_x + 2, start_y + 4), SetForegroundColor(Color::Grey))?;
+            write!(stdout, "Rarity: ")?;
+            execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)))?;
+            write!(stdout, "{}", item.rarity.name())?;
+
+            execute!(stdout, MoveTo(detail_x + 2, start_y + 5), SetForegroundColor(Color::Grey))?;
+            write!(stdout, "Type: ")?;
+            execute!(stdout, SetForegroundColor(Color::White))?;
+            write!(stdout, "{}", item_type_indicator(&item.kind).trim_matches(|c| c == '[' || c == ']'))?;
+
+            execute!(stdout, MoveTo(detail_x + 2, start_y + 7), SetForegroundColor(Color::Cyan))?;
+            write!(stdout, "-- Stats --")?;
+
+            let mut stat_line = start_y + 8;
+            let atk = item.kind.attack_bonus();
+            let def = item.kind.defense_bonus();
+            let hp = item.kind.hp_bonus();
+            let mp = item.kind.mana_bonus();
+
+            if atk > 0 {
+                execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Yellow))?;
+                write!(stdout, "Attack: +{}", atk)?;
+                stat_line += 1;
+            }
+            if def > 0 {
+                execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Cyan))?;
+                write!(stdout, "Defense: +{}", def)?;
+                stat_line += 1;
+            }
+            if hp > 0 {
+                execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Green))?;
+                write!(stdout, "Max HP: +{}", hp)?;
+                stat_line += 1;
+            }
+            if mp > 0 {
+                execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Blue))?;
+                write!(stdout, "Max Mana: +{}", mp)?;
+                stat_line += 1;
+            }
+
+            if item.kind.is_consumable() {
+                let heal = item.kind.heal_amount();
+                let mana = item.kind.mana_restore();
+                let food = item.kind.food_value();
+
+                if heal > 0 {
+                    execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Green))?;
+                    write!(stdout, "Heals: {} HP", heal)?;
+                    stat_line += 1;
+                }
+                if mana > 0 {
+                    execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Blue))?;
+                    write!(stdout, "Restores: {} MP", mana)?;
+                    stat_line += 1;
+                }
+                if food > 0 {
+                    execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Yellow))?;
+                    write!(stdout, "Food: +{}", food)?;
+                }
+            }
+
+            // Comparison
+            if let Some(slot) = item.kind.equip_slot() {
+                execute!(stdout, MoveTo(detail_x + 2, start_y + 16), SetForegroundColor(Color::Magenta))?;
+                write!(stdout, "-- Comparison --")?;
+
+                if let Some(equipped) = state.player.equipment.get(&slot) {
+                    execute!(stdout, MoveTo(detail_x + 2, start_y + 17), SetForegroundColor(Color::Grey))?;
+                    write!(stdout, "Equipped: ")?;
+                    execute!(stdout, SetForegroundColor(rarity_color(&equipped.rarity)))?;
+                    let eq_name = equipped.kind.name();
+                    let eq_trunc = if eq_name.len() > 15 { format!("{}...", &eq_name[..12]) } else { eq_name.to_string() };
+                    write!(stdout, "{}", eq_trunc)?;
+
+                    let curr_atk = equipped.kind.attack_bonus();
+                    let new_atk = item.kind.attack_bonus();
+                    if curr_atk != 0 || new_atk != 0 {
+                        execute!(stdout, MoveTo(detail_x + 2, start_y + 18), SetForegroundColor(Color::Grey))?;
+                        write!(stdout, "ATK: {}->{} ", curr_atk, new_atk)?;
+                        let diff = new_atk - curr_atk;
+                        if diff > 0 {
+                            execute!(stdout, SetForegroundColor(Color::Green))?;
+                            write!(stdout, "(+{})", diff)?;
+                        } else if diff < 0 {
+                            execute!(stdout, SetForegroundColor(Color::Red))?;
+                            write!(stdout, "({})", diff)?;
+                        }
+                    }
+
+                    let curr_def = equipped.kind.defense_bonus();
+                    let new_def = item.kind.defense_bonus();
+                    if curr_def != 0 || new_def != 0 {
+                        execute!(stdout, MoveTo(detail_x + 2, start_y + 19), SetForegroundColor(Color::Grey))?;
+                        write!(stdout, "DEF: {}->{} ", curr_def, new_def)?;
+                        let diff = new_def - curr_def;
+                        if diff > 0 {
+                            execute!(stdout, SetForegroundColor(Color::Green))?;
+                            write!(stdout, "(+{})", diff)?;
+                        } else if diff < 0 {
+                            execute!(stdout, SetForegroundColor(Color::Red))?;
+                            write!(stdout, "({})", diff)?;
+                        }
+                    }
+
+                    let curr_hp = equipped.kind.hp_bonus();
+                    let new_hp = item.kind.hp_bonus();
+                    if curr_hp != 0 || new_hp != 0 {
+                        execute!(stdout, MoveTo(detail_x + 2, start_y + 20), SetForegroundColor(Color::Grey))?;
+                        write!(stdout, "HP: {}->{} ", curr_hp, new_hp)?;
+                        let diff = new_hp - curr_hp;
+                        if diff > 0 {
+                            execute!(stdout, SetForegroundColor(Color::Green))?;
+                            write!(stdout, "(+{})", diff)?;
+                        } else if diff < 0 {
+                            execute!(stdout, SetForegroundColor(Color::Red))?;
+                            write!(stdout, "({})", diff)?;
+                        }
+                    }
+                } else {
+                    execute!(stdout, MoveTo(detail_x + 2, start_y + 17), SetForegroundColor(Color::DarkGrey))?;
+                    write!(stdout, "Slot is empty")?;
+                    execute!(stdout, MoveTo(detail_x + 2, start_y + 18), SetForegroundColor(Color::Green))?;
+                    if atk > 0 { write!(stdout, "ATK:+{} ", atk)?; }
+                    if def > 0 { write!(stdout, "DEF:+{} ", def)?; }
+                }
+            }
+        } else {
+            execute!(stdout, MoveTo(detail_x + 2, start_y + 3), SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "No items in inventory")?;
+        }
+
+        // Controls help
+        execute!(stdout, MoveTo(start_x + 2, start_y + height - 3), SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "[I/ESC]Close [D]Drop [S]Sort [Enter]Use")?;
+
+        execute!(stdout, ResetColor)?;
+        Ok(())
+    })
+}
+
+
+fn render_help_page(help_state: &HelpState) -> std::io::Result<()> {
+    let mut stdout = stdout();
+
+    let start_x = 5;
+    let start_y = 2;
+    let width = 70;
+    let height = 40;
 
     // Draw border
     for y in start_y..(start_y + height) {
         execute!(stdout, MoveTo(start_x, y))?;
         if y == start_y || y == start_y + height - 1 {
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, "{}", "=".repeat(width))?;
         } else {
-            write!(stdout, "|{}|", " ".repeat(width - 2))?;
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "|")?;
+            execute!(stdout, ResetColor)?;
+            write!(stdout, "{}", " ".repeat(width - 2))?;
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "|")?;
         }
+        execute!(stdout, ResetColor)?;
     }
 
-    // Title
+    // Title bar with page indicator
     execute!(stdout, MoveTo(start_x + 2, start_y + 1))?;
-    execute!(stdout, SetForegroundColor(Color::Yellow))?;
-    write!(stdout, "=== INVENTORY ({}/{}) ===", state.player.inventory.len(), 20)?;
-    execute!(stdout, ResetColor)?;
+    execute!(stdout, SetForegroundColor(Color::Yellow), SetAttribute(Attribute::Bold))?;
+    write!(stdout, "=== SHADOWCRYPT HELP: {} ===", help_state.page.title())?;
+    execute!(stdout, SetAttribute(Attribute::Reset), ResetColor)?;
 
-    // Equipped items
-    execute!(stdout, MoveTo(start_x + 2, start_y + 3))?;
+    // Page indicator
+    execute!(stdout, MoveTo(start_x + width as u16 - 15, start_y + 1))?;
     execute!(stdout, SetForegroundColor(Color::Cyan))?;
-    write!(stdout, "-- Equipped --")?;
+    write!(stdout, "Page {}/6", help_state.page.page_number())?;
     execute!(stdout, ResetColor)?;
 
-    let slots = [
-        (EquipSlot::Weapon, "Weapon"),
-        (EquipSlot::Armor, "Armor"),
-        (EquipSlot::Shield, "Shield"),
-        (EquipSlot::Helmet, "Helmet"),
-        (EquipSlot::Gloves, "Gloves"),
-        (EquipSlot::Boots, "Boots"),
-        (EquipSlot::Ring, "Ring"),
-        (EquipSlot::Amulet, "Amulet"),
-    ];
+    // Get content for current page
+    let content = help_state.page.content();
 
-    for (i, (slot, name)) in slots.iter().enumerate() {
-        execute!(stdout, MoveTo(start_x + 2, start_y + 4 + i as u16))?;
-        if let Some(item) = state.player.equipment.get(slot) {
-            execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)))?;
-            write!(stdout, "{}: {}{}", name, item.rarity.prefix(), item.kind.name())?;
+    for (i, (key, desc)) in content.iter().enumerate() {
+        execute!(stdout, MoveTo(start_x + 2, start_y + 3 + i as u16))?;
+        if key.starts_with("  ") {
+            // Indented item
+            execute!(stdout, SetForegroundColor(Color::Cyan))?;
+            write!(stdout, "{:<24}", key)?;
+            execute!(stdout, SetForegroundColor(Color::White))?;
+            write!(stdout, "{}", desc)?;
+        } else if !key.is_empty() {
+            // Section header
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "{}", key)?;
+            execute!(stdout, SetForegroundColor(Color::White))?;
+            write!(stdout, "{}", desc)?;
+        }
+        execute!(stdout, ResetColor)?;
+    }
+
+    // Page tabs at bottom
+    execute!(stdout, MoveTo(start_x + 2, start_y + height as u16 - 4))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "{}", "-".repeat(width - 4))?;
+
+    execute!(stdout, MoveTo(start_x + 2, start_y + height as u16 - 3))?;
+    let pages = [
+        (HelpPage::Overview, "1:Overview"),
+        (HelpPage::Controls, "2:Controls"),
+        (HelpPage::Items, "3:Items"),
+        (HelpPage::Enemies, "4:Enemies"),
+        (HelpPage::Skills, "5:Skills"),
+        (HelpPage::Mechanics, "6:Mechanics"),
+    ];
+    for (page, label) in pages.iter() {
+        if *page == help_state.page {
+            execute!(stdout, SetForegroundColor(Color::Yellow), SetAttribute(Attribute::Bold))?;
+            write!(stdout, "[{}] ", label)?;
+            execute!(stdout, SetAttribute(Attribute::Reset))?;
         } else {
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
-            write!(stdout, "{}: (empty)", name)?;
+            write!(stdout, " {}  ", label)?;
         }
-        execute!(stdout, ResetColor)?;
     }
-
-    // Inventory items
-    execute!(stdout, MoveTo(start_x + 2, start_y + 14))?;
-    execute!(stdout, SetForegroundColor(Color::Cyan))?;
-    write!(stdout, "-- Items (1-9,0 to use/equip) --")?;
     execute!(stdout, ResetColor)?;
 
-    for (i, item) in state.player.inventory.iter().take(10).enumerate() {
-        execute!(stdout, MoveTo(start_x + 2, start_y + 15 + i as u16))?;
-        execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)))?;
-        let key = if i == 9 { 0 } else { i + 1 };
-        write!(stdout, "{}: {}{}", key, item.rarity.prefix(), item.kind.name())?;
-        execute!(stdout, ResetColor)?;
-    }
-
-    // Instructions
-    execute!(stdout, MoveTo(start_x + 2, start_y + 27))?;
+    // Navigation instructions
+    execute!(stdout, MoveTo(start_x + 2, start_y + height as u16 - 2))?;
     execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
-    write!(stdout, "Press I or ESC to close")?;
+    write!(stdout, "[Left/H: Prev] [Right/L: Next] [1-6: Jump] [?/ESC: Close]")?;
     execute!(stdout, ResetColor)?;
 
     Ok(())
 }
 
-fn render_help(_state: &GameState) -> std::io::Result<()> {
+/// Render tutorial overlay
+fn render_tutorial(tutorial: &TutorialState) -> std::io::Result<()> {
     let mut stdout = stdout();
 
-    let start_x = 5;
-    let start_y = 3;
-    let width = 70;
-    let height = 38;
+    let start_x = 10;
+    let start_y = 8;
+    let width = 60;
+    let height = 20;
 
-    // Draw border
+    // Draw border with highlight
     for y in start_y..(start_y + height) {
         execute!(stdout, MoveTo(start_x, y))?;
         if y == start_y || y == start_y + height - 1 {
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
             write!(stdout, "{}", "=".repeat(width))?;
         } else {
-            write!(stdout, "|{}|", " ".repeat(width - 2))?;
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "|")?;
+            execute!(stdout, SetBackgroundColor(Color::Rgb { r: 20, g: 20, b: 40 }))?;
+            write!(stdout, "{}", " ".repeat(width - 2))?;
+            execute!(stdout, ResetColor)?;
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "|")?;
         }
+        execute!(stdout, ResetColor)?;
     }
 
     // Title
     execute!(stdout, MoveTo(start_x + 2, start_y + 1))?;
-    execute!(stdout, SetForegroundColor(Color::Yellow))?;
-    write!(stdout, "=== SHADOWCRYPT HELP ===")?;
+    execute!(stdout, SetForegroundColor(Color::Cyan), SetAttribute(Attribute::Bold))?;
+    write!(stdout, "TUTORIAL: {}", tutorial.step.title())?;
+    execute!(stdout, SetAttribute(Attribute::Reset), ResetColor)?;
+
+    // Step indicator
+    execute!(stdout, MoveTo(start_x + width as u16 - 12, start_y + 1))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "Step {}/8", tutorial.step.step_number())?;
     execute!(stdout, ResetColor)?;
 
-    let help_text = [
-        ("", ""),
-        ("MOVEMENT:", ""),
-        ("  WASD / Arrow Keys / HJKL", "Move in 4 directions"),
-        ("  YUBN (Vi-diagonal)", "Move diagonally"),
-        ("  Shift + Direction", "Run (auto-move)"),
-        ("  5 or Period (.)", "Wait one turn"),
-        ("", ""),
-        ("TARGETING:", ""),
-        ("  Tab", "Cycle to next visible enemy"),
-        ("  Shift+Tab", "Cycle to previous enemy"),
-        ("  t", "Toggle target lock"),
-        ("  f", "Attack current target"),
-        ("  Esc (in targeting)", "Cancel targeting"),
-        ("", ""),
-        ("ACTIONS:", ""),
-        ("  Space", "Use current skill (on target if set)"),
-        ("  Shift+Tab (no target)", "Cycle through skills"),
-        ("  I", "Open/close inventory"),
-        ("  1-9, 0", "Use item from inventory"),
-        ("  > / <", "Descend/Ascend stairs"),
-        ("  ?", "Toggle this help screen"),
-        ("  Q or ESC", "Quit game"),
-        ("", ""),
-        ("SYMBOLS:", ""),
-        ("  @", "You (magenta when targeting)"),
-        ("  Highlighted enemy", "Current target"),
-        ("", ""),
-        ("GOAL: Reach level 30, defeat the Demon King!", ""),
-    ];
+    // Content lines
+    let lines = tutorial.step.lines();
+    for (i, line) in lines.iter().enumerate() {
+        execute!(stdout, MoveTo(start_x + 3, start_y + 3 + i as u16))?;
 
-    for (i, (key, desc)) in help_text.iter().enumerate() {
-        execute!(stdout, MoveTo(start_x + 2, start_y + 2 + i as u16))?;
-        if !key.is_empty() {
+        // Color code certain elements
+        if line.starts_with("  ") && line.contains(" - ") {
+            // Key binding line
+            let parts: Vec<&str> = line.splitn(2, " - ").collect();
             execute!(stdout, SetForegroundColor(Color::Cyan))?;
-            write!(stdout, "{:<30}", key)?;
+            write!(stdout, "{}", parts[0])?;
+            if parts.len() > 1 {
+                execute!(stdout, SetForegroundColor(Color::White))?;
+                write!(stdout, " - {}", parts[1])?;
+            }
+        } else if line.contains("=") && !line.starts_with("  ") {
+            // Item/rarity line
+            execute!(stdout, SetForegroundColor(Color::Green))?;
+            write!(stdout, "{}", line)?;
+        } else if line.starts_with("  ") {
+            // Indented instruction
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "{}", line)?;
+        } else {
+            execute!(stdout, SetForegroundColor(Color::White))?;
+            write!(stdout, "{}", line)?;
         }
-        execute!(stdout, SetForegroundColor(Color::White))?;
-        write!(stdout, "{}", desc)?;
         execute!(stdout, ResetColor)?;
     }
 
-    // Instructions
-    execute!(stdout, MoveTo(start_x + 2, start_y + 35))?;
+    // Progress bar
+    execute!(stdout, MoveTo(start_x + 2, start_y + height as u16 - 3))?;
     execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
-    write!(stdout, "Press ? or ESC to close")?;
+    write!(stdout, "Progress: ")?;
+    let step_num = tutorial.step.step_number() as usize;
+    for i in 1..=8 {
+        if i < step_num {
+            execute!(stdout, SetForegroundColor(Color::Green))?;
+            write!(stdout, "[#]")?;
+        } else if i == step_num {
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "[>]")?;
+        } else {
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "[ ]")?;
+        }
+    }
+    execute!(stdout, ResetColor)?;
+
+    // Navigation hint
+    execute!(stdout, MoveTo(start_x + 2, start_y + height as u16 - 2))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "{}", tutorial.step.hint())?;
     execute!(stdout, ResetColor)?;
 
     Ok(())
+}
+
+/// Legacy render_help wrapper for compatibility
+fn render_help(_state: &GameState) -> std::io::Result<()> {
+    // This is called when state.show_help is true but we don't have HelpState
+    // Create a default help state and render
+    let help_state = HelpState::new();
+    render_help_page(&help_state)
 }
 
 fn render_class_select() -> std::io::Result<()> {

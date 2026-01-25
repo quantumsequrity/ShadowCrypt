@@ -51,12 +51,15 @@ pub mod weather;
 pub mod ai;
 pub mod companions;
 pub mod challenges;
+pub mod enchantments;
 pub mod game;
 pub mod save;
 pub mod quests;
 pub mod time;
 pub mod achievements;
 pub mod runes;
+pub mod crafting;
+pub mod talents;
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -105,6 +108,7 @@ pub use combat::StatusEffect;
 pub use items::{Item, ItemKind, Rarity, EquipSlot};
 pub use entities::{Player, Enemy, EnemyKind};
 pub use world::{Map, Tile, DungeonTheme, Room};
+pub use weather::{WeatherSystem, WeatherType, WeatherIntensity, WeatherCombatModifiers, DamageType};
 pub use ai::{AIAction, AIDecider};
 pub use companions::{
     Companion, CompanionKind, CompanionRarity, CompanionAbility,
@@ -124,4 +128,10 @@ pub use time::{
 pub use achievements::{
     Achievement, AchievementId, AchievementCategory, AchievementTracker,
     AchievementReward, AchievementStats, RunStats, StatType,
+};
+
+// Talent system re-exports
+pub use talents::{
+    TalentId, Talent, TalentTree, TalentEffect, PlayerTalents, TalentStatBonuses,
+    Element, TALENT_POINTS_PER_LEVEL, BONUS_POINTS_AT_LEVELS,
 };

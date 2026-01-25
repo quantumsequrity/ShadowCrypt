@@ -753,16 +753,6 @@ struct ShadowCryptApp {
     settings_tab: SettingsTab,
     /// Last recorded turn count for cooldown tracking
     last_turn_count: u32,
-    /// Particle effects system
-    particles: ParticleSystem,
-    /// Queued particle events
-    particle_events: VecDeque<ParticleEvent>,
-    /// Show particle debug info
-    show_particle_debug: bool,
-    /// Previous player HP for damage detection
-    previous_player_hp: i32,
-    /// Previous player level for level-up detection
-    previous_player_level: u32,
 }
 
 impl Default for ShadowCryptApp {
