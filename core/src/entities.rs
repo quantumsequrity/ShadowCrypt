@@ -6,8 +6,182 @@ use serde::{Serialize, Deserialize};
 
 use crate::classes::CharacterClass;
 use crate::combat::StatusEffect;
-use crate::items::{EquipSlot, Item, ItemKind};
+use crate::items::{EquipSlot, Item, ItemKind, FoodQuality};
 use crate::magic::Skill;
+
+/// Hunger stages with increasing severity
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug)]
+pub enum HungerStage {
+    Stuffed,      // 90-100+ hunger - slight speed penalty, bonus regen
+    Satisfied,    // 70-89 hunger - optimal state, small bonuses
+    Peckish,      // 50-69 hunger - neutral state
+    Hungry,       // 30-49 hunger - minor penalties start
+    VeryHungry,   // 10-29 hunger - moderate penalties
+    Starving,     // 1-9 hunger - severe penalties
+    Famished,     // 0 or below - taking damage, near death
+}
+
+impl HungerStage {
+    /// Get hunger stage from current hunger value
+    pub fn from_hunger(hunger: i32, max_hunger: i32) -> Self {
+        let percent = (hunger * 100) / max_hunger.max(1);
+        match percent {
+            p if p >= 90 => HungerStage::Stuffed,
+            p if p >= 70 => HungerStage::Satisfied,
+            p if p >= 50 => HungerStage::Peckish,
+            p if p >= 30 => HungerStage::Hungry,
+            p if p >= 10 => HungerStage::VeryHungry,
+            p if p >= 1 => HungerStage::Starving,
+            _ => HungerStage::Famished,
+        }
+    }
+
+    /// Get the name of this hunger stage
+    pub fn name(&self) -> &'static str {
+        match self {
+            HungerStage::Stuffed => "Stuffed",
+            HungerStage::Satisfied => "Satisfied",
+            HungerStage::Peckish => "Peckish",
+            HungerStage::Hungry => "Hungry",
+            HungerStage::VeryHungry => "Very Hungry",
+            HungerStage::Starving => "Starving",
+            HungerStage::Famished => "Famished",
+        }
+    }
+
+    /// Get color index for UI display
+    pub fn color_index(&self) -> u8 {
+        match self {
+            HungerStage::Stuffed => 5,      // Green
+            HungerStage::Satisfied => 13,   // Bright green
+            HungerStage::Peckish => 1,      // White/grey
+            HungerStage::Hungry => 11,      // Yellow
+            HungerStage::VeryHungry => 6,   // Orange
+            HungerStage::Starving => 3,     // Red
+            HungerStage::Famished => 4,     // Dark red
+        }
+    }
+
+    /// Get attack modifier for this hunger stage (percentage)
+    pub fn attack_modifier(&self) -> i32 {
+        match self {
+            HungerStage::Stuffed => -5,     // Slightly sluggish
+            HungerStage::Satisfied => 10,   // Well-nourished bonus
+            HungerStage::Peckish => 0,
+            HungerStage::Hungry => -5,
+            HungerStage::VeryHungry => -15,
+            HungerStage::Starving => -30,
+            HungerStage::Famished => -50,
+        }
+    }
+
+    /// Get defense modifier for this hunger stage (percentage)
+    pub fn defense_modifier(&self) -> i32 {
+        match self {
+            HungerStage::Stuffed => 5,      // Full belly provides padding
+            HungerStage::Satisfied => 5,
+            HungerStage::Peckish => 0,
+            HungerStage::Hungry => -5,
+            HungerStage::VeryHungry => -10,
+            HungerStage::Starving => -20,
+            HungerStage::Famished => -40,
+        }
+    }
+
+    /// Get HP regeneration modifier (flat bonus/penalty per regen tick)
+    pub fn regen_modifier(&self) -> i32 {
+        match self {
+            HungerStage::Stuffed => 2,      // Extra regen when stuffed
+            HungerStage::Satisfied => 1,
+            HungerStage::Peckish => 0,
+            HungerStage::Hungry => 0,
+            HungerStage::VeryHungry => -1,  // Regen is slower
+            HungerStage::Starving => -2,
+            HungerStage::Famished => -3,
+        }
+    }
+
+    /// Get hunger decay rate (how fast hunger depletes per tick)
+    pub fn decay_rate(&self) -> i32 {
+        match self {
+            HungerStage::Stuffed => 2,      // Faster decay when overfull
+            HungerStage::Satisfied => 1,
+            HungerStage::Peckish => 1,
+            HungerStage::Hungry => 1,
+            HungerStage::VeryHungry => 1,
+            HungerStage::Starving => 1,
+            HungerStage::Famished => 0,     // Can't go lower
+        }
+    }
+
+    /// Get starvation damage per tick (only for Famished)
+    pub fn starvation_damage(&self) -> i32 {
+        match self {
+            HungerStage::Famished => 3,
+            HungerStage::Starving => 1,
+            _ => 0,
+        }
+    }
+}
+
+/// Satiation bonus from eating high-quality food
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+pub struct SatiationBonus {
+    pub attack_bonus: i32,
+    pub defense_bonus: i32,
+    pub max_hp_bonus: i32,
+    pub regen_bonus: i32,
+    pub turns_remaining: u32,
+}
+
+impl SatiationBonus {
+    pub fn new(quality: FoodQuality, base_food_value: i32) -> Self {
+        let multiplier = match quality {
+            FoodQuality::Rotten => 0.0,
+            FoodQuality::Raw => 0.5,
+            FoodQuality::Stale => 0.75,
+            FoodQuality::Fresh => 1.0,
+            FoodQuality::Cooked => 1.5,
+            FoodQuality::WellCooked => 2.0,
+            FoodQuality::Gourmet => 3.0,
+            FoodQuality::Legendary => 5.0,
+        };
+
+        let duration = match quality {
+            FoodQuality::Rotten => 0,
+            FoodQuality::Raw => 10,
+            FoodQuality::Stale => 15,
+            FoodQuality::Fresh => 25,
+            FoodQuality::Cooked => 40,
+            FoodQuality::WellCooked => 60,
+            FoodQuality::Gourmet => 100,
+            FoodQuality::Legendary => 200,
+        };
+
+        let base = (base_food_value as f32 * multiplier * 0.1) as i32;
+
+        Self {
+            attack_bonus: base.max(0),
+            defense_bonus: (base / 2).max(0),
+            max_hp_bonus: (base * 2).max(0),
+            regen_bonus: if quality >= FoodQuality::Cooked { 1 } else { 0 },
+            turns_remaining: duration,
+        }
+    }
+
+    pub fn tick(&mut self) -> bool {
+        if self.turns_remaining > 0 {
+            self.turns_remaining -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.turns_remaining > 0
+    }
+}
 
 /// All enemy types in the game
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
@@ -635,6 +809,12 @@ pub struct Player {
     pub skills: Vec<Skill>,
     pub active_skill: usize,
     pub minions: Vec<Enemy>,
+    /// Active satiation bonus from eating quality food
+    pub satiation_bonus: Option<SatiationBonus>,
+    /// Cooking skill level (0-100) - affects cooking quality
+    pub cooking_skill: u32,
+    /// Meals cooked (for skill progression)
+    pub meals_cooked: u32,
 }
 
 impl Player {
@@ -666,10 +846,18 @@ impl Player {
             skills: Skill::for_class(class),
             active_skill: 0,
             minions: Vec::new(),
+            satiation_bonus: None,
+            cooking_skill: 0,
+            meals_cooked: 0,
         }
     }
 
-    /// Calculate total attack
+    /// Get current hunger stage
+    pub fn hunger_stage(&self) -> HungerStage {
+        HungerStage::from_hunger(self.hunger, self.max_hunger)
+    }
+
+    /// Calculate total attack including hunger and satiation effects
     pub fn total_attack(&self) -> i32 {
         let mut total = self.base_attack;
         for item in self.equipment.values() {
@@ -682,10 +870,23 @@ impl Player {
         if self.has_status(StatusEffect::Weakness) {
             total = (total as f32 * 0.5) as i32;
         }
-        total
+
+        // Apply hunger stage modifier
+        let hunger_stage = self.hunger_stage();
+        let hunger_mod = hunger_stage.attack_modifier();
+        total = ((total as f32) * (1.0 + hunger_mod as f32 / 100.0)) as i32;
+
+        // Apply satiation bonus
+        if let Some(ref bonus) = self.satiation_bonus {
+            if bonus.is_active() {
+                total += bonus.attack_bonus;
+            }
+        }
+
+        total.max(1)
     }
 
-    /// Calculate total defense
+    /// Calculate total defense including hunger and satiation effects
     pub fn total_defense(&self) -> i32 {
         let mut total = self.base_defense;
         for item in self.equipment.values() {
@@ -695,16 +896,37 @@ impl Player {
         if self.has_status(StatusEffect::Shield) {
             total += 10;
         }
-        total
+
+        // Apply hunger stage modifier
+        let hunger_stage = self.hunger_stage();
+        let hunger_mod = hunger_stage.defense_modifier();
+        total = ((total as f32) * (1.0 + hunger_mod as f32 / 100.0)) as i32;
+
+        // Apply satiation bonus
+        if let Some(ref bonus) = self.satiation_bonus {
+            if bonus.is_active() {
+                total += bonus.defense_bonus;
+            }
+        }
+
+        total.max(0)
     }
 
-    /// Calculate total max HP
+    /// Calculate total max HP including satiation bonus
     pub fn total_max_hp(&self) -> i32 {
         let mut total = self.max_hp;
         for item in self.equipment.values() {
             let (_, _, hp, _) = item.stats();
             total += hp;
         }
+
+        // Apply satiation bonus
+        if let Some(ref bonus) = self.satiation_bonus {
+            if bonus.is_active() {
+                total += bonus.max_hp_bonus;
+            }
+        }
+
         total
     }
 
@@ -746,9 +968,121 @@ impl Player {
         self.mana = (self.mana + amount).min(self.total_max_mana());
     }
 
-    /// Eat food
+    /// Eat food with quality - returns messages about the meal
     pub fn eat(&mut self, food_value: i32) {
-        self.hunger = (self.hunger + food_value).min(self.max_hunger);
+        self.hunger = (self.hunger + food_value).min(self.max_hunger + 20); // Can overfill slightly
+    }
+
+    /// Eat food with quality and apply satiation bonus
+    pub fn eat_quality_food(&mut self, food_value: i32, quality: FoodQuality) -> Vec<String> {
+        let mut messages = Vec::new();
+        let old_stage = self.hunger_stage();
+
+        // Calculate actual food value based on quality
+        let quality_mult = match quality {
+            FoodQuality::Rotten => 0.3,      // Barely fills, might make sick
+            FoodQuality::Raw => 0.6,
+            FoodQuality::Stale => 0.8,
+            FoodQuality::Fresh => 1.0,
+            FoodQuality::Cooked => 1.3,
+            FoodQuality::WellCooked => 1.5,
+            FoodQuality::Gourmet => 2.0,
+            FoodQuality::Legendary => 3.0,
+        };
+
+        let actual_value = (food_value as f32 * quality_mult) as i32;
+        self.hunger = (self.hunger + actual_value).min(self.max_hunger + 20);
+
+        // Apply satiation bonus for good quality food
+        if quality >= FoodQuality::Fresh {
+            let bonus = SatiationBonus::new(quality, food_value);
+            if bonus.turns_remaining > 0 {
+                // Stack or replace satiation bonus
+                if let Some(ref mut existing) = self.satiation_bonus {
+                    // Combine bonuses if new is better
+                    if bonus.attack_bonus > existing.attack_bonus {
+                        existing.attack_bonus = bonus.attack_bonus;
+                    }
+                    if bonus.defense_bonus > existing.defense_bonus {
+                        existing.defense_bonus = bonus.defense_bonus;
+                    }
+                    if bonus.max_hp_bonus > existing.max_hp_bonus {
+                        existing.max_hp_bonus = bonus.max_hp_bonus;
+                    }
+                    existing.turns_remaining = existing.turns_remaining.max(bonus.turns_remaining);
+                } else {
+                    self.satiation_bonus = Some(bonus);
+                }
+
+                messages.push(format!("The {} meal gives you strength! (+{} Atk, +{} Def for {} turns)",
+                    quality.name(),
+                    bonus.attack_bonus,
+                    bonus.defense_bonus,
+                    bonus.turns_remaining));
+            }
+        }
+
+        // Negative effects for rotten food
+        if quality == FoodQuality::Rotten {
+            messages.push("Ugh! The food was rotten!".to_string());
+            // 50% chance of food poisoning
+            messages.push("You feel sick...".to_string());
+        }
+
+        let new_stage = self.hunger_stage();
+        if new_stage != old_stage {
+            messages.push(format!("You feel {}.", new_stage.name().to_lowercase()));
+        }
+
+        messages
+    }
+
+    /// Improve cooking skill from cooking
+    pub fn improve_cooking(&mut self) -> Option<String> {
+        self.meals_cooked += 1;
+        let old_skill = self.cooking_skill;
+
+        // Skill improves with practice, diminishing returns
+        let improvement = (100 - self.cooking_skill) / 20 + 1;
+        self.cooking_skill = (self.cooking_skill + improvement).min(100);
+
+        if self.cooking_skill > old_skill && self.cooking_skill % 10 == 0 {
+            Some(format!("Your cooking skill improved to {}!", self.cooking_skill))
+        } else {
+            None
+        }
+    }
+
+    /// Get cooking quality based on skill
+    pub fn get_cooking_result(&self, base_quality: FoodQuality) -> FoodQuality {
+        // Cooking can improve quality up to a limit
+        let skill_bonus = self.cooking_skill / 25; // 0-4 quality levels
+
+        let base_level = match base_quality {
+            FoodQuality::Rotten => 0,
+            FoodQuality::Raw => 1,
+            FoodQuality::Stale => 2,
+            FoodQuality::Fresh => 3,
+            FoodQuality::Cooked => 4,
+            FoodQuality::WellCooked => 5,
+            FoodQuality::Gourmet => 6,
+            FoodQuality::Legendary => 7,
+        };
+
+        // Cooking raw food improves it by 2-4 levels based on skill
+        let improvement = 2 + skill_bonus as i32;
+        let new_level = (base_level + improvement).min(6); // Can't reach Legendary by cooking
+
+        match new_level {
+            0 => FoodQuality::Rotten,
+            1 => FoodQuality::Raw,
+            2 => FoodQuality::Stale,
+            3 => FoodQuality::Fresh,
+            4 => FoodQuality::Cooked,
+            5 => FoodQuality::WellCooked,
+            6 => FoodQuality::Gourmet,
+            _ => FoodQuality::Legendary,
+        }
     }
 
     /// Add a status effect
@@ -809,17 +1143,59 @@ impl Player {
         messages
     }
 
-    /// Tick hunger and return optional message
-    pub fn tick_hunger(&mut self) -> Option<String> {
-        self.hunger -= 1;
-        if self.hunger <= 0 {
-            self.hp -= 1;
-            Some("You are starving!".to_string())
-        } else if self.hunger < 20 {
-            Some("You are very hungry!".to_string())
-        } else {
-            None
+    /// Tick hunger and return messages about hunger state
+    pub fn tick_hunger(&mut self) -> Vec<String> {
+        let mut messages = Vec::new();
+        let old_stage = self.hunger_stage();
+
+        // Decay hunger based on current stage
+        let decay = old_stage.decay_rate();
+        self.hunger = (self.hunger - decay).max(-10); // Can go slightly negative
+
+        let new_stage = self.hunger_stage();
+
+        // Apply starvation damage
+        let damage = new_stage.starvation_damage();
+        if damage > 0 {
+            self.hp -= damage;
+            messages.push(format!("You are {}! (-{} HP)", new_stage.name().to_lowercase(), damage));
         }
+
+        // Notify on stage changes
+        if new_stage != old_stage {
+            match new_stage {
+                HungerStage::Stuffed => messages.push("You feel overly full and sluggish.".to_string()),
+                HungerStage::Satisfied => messages.push("You feel well-nourished.".to_string()),
+                HungerStage::Peckish => messages.push("You could eat something.".to_string()),
+                HungerStage::Hungry => messages.push("Your stomach growls. You are hungry.".to_string()),
+                HungerStage::VeryHungry => messages.push("You are very hungry! Find food soon!".to_string()),
+                HungerStage::Starving => messages.push("You are starving! Your body is weakening!".to_string()),
+                HungerStage::Famished => messages.push("You are famished! You will die without food!".to_string()),
+            }
+        }
+
+        // Tick satiation bonus
+        if let Some(ref mut bonus) = self.satiation_bonus {
+            if !bonus.tick() {
+                messages.push("Your satiation bonus has worn off.".to_string());
+            }
+        }
+        if self.satiation_bonus.as_ref().map_or(false, |b| !b.is_active()) {
+            self.satiation_bonus = None;
+        }
+
+        messages
+    }
+
+    /// Get regeneration bonus from hunger and satiation
+    pub fn hunger_regen_bonus(&self) -> i32 {
+        let mut bonus = self.hunger_stage().regen_modifier();
+        if let Some(ref satiation) = self.satiation_bonus {
+            if satiation.is_active() {
+                bonus += satiation.regen_bonus;
+            }
+        }
+        bonus
     }
 
     /// Equip an item and return the previously equipped item

@@ -1,4 +1,10 @@
 //! World system: map, tiles, rooms, and dungeon generation
+//!
+//! This module contains the dungeon generation system including:
+//! - Standard room generation
+//! - Special room types (treasure vaults, boss arenas, puzzle rooms, trap gauntlets, merchant camps)
+//! - Corridor and tunnel generation
+//! - Theme-based environmental features
 
 use rand::prelude::*;
 use serde::{Serialize, Deserialize};
@@ -12,6 +18,12 @@ pub const MIN_ROOM_SIZE: usize = 5;
 pub const MAX_ROOM_SIZE: usize = 15;
 pub const MAX_DUNGEON_LEVEL: u32 = 30;
 pub const BOSS_LEVELS: [u32; 6] = [5, 10, 15, 20, 25, 30];
+
+/// Special room size constraints
+pub const SPECIAL_ROOM_MIN_SIZE: usize = 8;
+pub const SPECIAL_ROOM_MAX_SIZE: usize = 14;
+pub const BOSS_ARENA_MIN_SIZE: usize = 12;
+pub const BOSS_ARENA_MAX_SIZE: usize = 18;
 
 /// Tile types in the dungeon
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
@@ -35,6 +47,52 @@ pub enum Tile {
     Ice,
     Sand,
     BossGate,
+    // New shrine types
+    BlessingShrine,
+    UsedBlessingShrine,
+    CurseShrine,
+    UsedCurseShrine,
+    StatShrine,
+    UsedStatShrine,
+    TeleportShrine,
+    UsedTeleportShrine,
+    ChaosShrine,
+    UsedChaosShrine,
+    WarShrine,
+    UsedWarShrine,
+    WisdomShrine,
+    UsedWisdomShrine,
+    SacrificeShrine,
+    UsedSacrificeShrine,
+    HealingShrine,
+    UsedHealingShrine,
+    LuckShrine,
+    UsedLuckShrine,
+    // Special room tiles
+    VaultDoor,
+    VaultFloor,
+    GoldPile,
+    GemDeposit,
+    ArenaPillar,
+    ArenaGate,
+    ArenaFloor,
+    BloodStain,
+    PuzzleFloor,
+    PuzzleTrigger,
+    PuzzleActivated,
+    PuzzleBarrier,
+    PuzzleBarrierOpen,
+    TrapFloor,
+    SpikeTrap,
+    FireTrap,
+    PoisonTrap,
+    ArrowTrap,
+    MerchantRug,
+    MerchantStall,
+    Campfire,
+    SupplyCrate,
+    WeaponRack,
+    PotionShelf,
 }
 
 impl Tile {
@@ -60,6 +118,27 @@ impl Tile {
             Self::Ice => '.',
             Self::Sand => '.',
             Self::BossGate => '8',
+            // New shrine glyphs - each has a unique character
+            Self::BlessingShrine => '*',
+            Self::UsedBlessingShrine => '.',
+            Self::CurseShrine => '!',
+            Self::UsedCurseShrine => '.',
+            Self::StatShrine => '+',
+            Self::UsedStatShrine => '.',
+            Self::TeleportShrine => '@',
+            Self::UsedTeleportShrine => '.',
+            Self::ChaosShrine => '?',
+            Self::UsedChaosShrine => '.',
+            Self::WarShrine => '%',
+            Self::UsedWarShrine => '.',
+            Self::WisdomShrine => '$',
+            Self::UsedWisdomShrine => '.',
+            Self::SacrificeShrine => '/',
+            Self::UsedSacrificeShrine => '.',
+            Self::HealingShrine => '+',
+            Self::UsedHealingShrine => '.',
+            Self::LuckShrine => '7',
+            Self::UsedLuckShrine => '.',
         }
     }
 
@@ -85,6 +164,27 @@ impl Tile {
             Self::Ice => 9,         // Cyan
             Self::Sand => 11,       // Yellow
             Self::BossGate => 3,    // Red
+            // New shrine colors
+            Self::BlessingShrine => 11,      // Yellow (divine)
+            Self::UsedBlessingShrine => 14,  // DarkMagenta
+            Self::CurseShrine => 4,          // DarkRed (ominous)
+            Self::UsedCurseShrine => 14,     // DarkMagenta
+            Self::StatShrine => 5,           // Green (growth)
+            Self::UsedStatShrine => 14,      // DarkMagenta
+            Self::TeleportShrine => 7,       // Blue (arcane)
+            Self::UsedTeleportShrine => 14,  // DarkMagenta
+            Self::ChaosShrine => 13,         // Magenta (chaotic)
+            Self::UsedChaosShrine => 14,     // DarkMagenta
+            Self::WarShrine => 3,            // Red (battle)
+            Self::UsedWarShrine => 14,       // DarkMagenta
+            Self::WisdomShrine => 9,         // Cyan (knowledge)
+            Self::UsedWisdomShrine => 14,    // DarkMagenta
+            Self::SacrificeShrine => 4,      // DarkRed (blood)
+            Self::UsedSacrificeShrine => 14, // DarkMagenta
+            Self::HealingShrine => 2,        // White (pure)
+            Self::UsedHealingShrine => 14,   // DarkMagenta
+            Self::LuckShrine => 11,          // Yellow (fortune)
+            Self::UsedLuckShrine => 14,      // DarkMagenta
         }
     }
 
@@ -105,7 +205,71 @@ impl Tile {
                 | Self::UsedShrine
                 | Self::OpenChest
                 | Self::BossGate
+                | Self::UsedBlessingShrine
+                | Self::UsedCurseShrine
+                | Self::UsedStatShrine
+                | Self::UsedTeleportShrine
+                | Self::UsedChaosShrine
+                | Self::UsedWarShrine
+                | Self::UsedWisdomShrine
+                | Self::UsedSacrificeShrine
+                | Self::UsedHealingShrine
+                | Self::UsedLuckShrine
         )
+    }
+
+    /// Returns whether this tile is an active (usable) shrine
+    pub fn is_shrine(&self) -> bool {
+        matches!(
+            self,
+            Self::Shrine
+                | Self::BlessingShrine
+                | Self::CurseShrine
+                | Self::StatShrine
+                | Self::TeleportShrine
+                | Self::ChaosShrine
+                | Self::WarShrine
+                | Self::WisdomShrine
+                | Self::SacrificeShrine
+                | Self::HealingShrine
+                | Self::LuckShrine
+        )
+    }
+
+    /// Returns the used version of this shrine tile
+    pub fn used_shrine(&self) -> Self {
+        match self {
+            Self::Shrine => Self::UsedShrine,
+            Self::BlessingShrine => Self::UsedBlessingShrine,
+            Self::CurseShrine => Self::UsedCurseShrine,
+            Self::StatShrine => Self::UsedStatShrine,
+            Self::TeleportShrine => Self::UsedTeleportShrine,
+            Self::ChaosShrine => Self::UsedChaosShrine,
+            Self::WarShrine => Self::UsedWarShrine,
+            Self::WisdomShrine => Self::UsedWisdomShrine,
+            Self::SacrificeShrine => Self::UsedSacrificeShrine,
+            Self::HealingShrine => Self::UsedHealingShrine,
+            Self::LuckShrine => Self::UsedLuckShrine,
+            _ => *self, // Return self if not a shrine
+        }
+    }
+
+    /// Returns the display name of the shrine
+    pub fn shrine_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Shrine => Some("Ancient Shrine"),
+            Self::BlessingShrine => Some("Shrine of Blessings"),
+            Self::CurseShrine => Some("Cursed Shrine"),
+            Self::StatShrine => Some("Shrine of Empowerment"),
+            Self::TeleportShrine => Some("Shrine of Translocation"),
+            Self::ChaosShrine => Some("Shrine of Chaos"),
+            Self::WarShrine => Some("War Shrine"),
+            Self::WisdomShrine => Some("Shrine of Wisdom"),
+            Self::SacrificeShrine => Some("Sacrificial Shrine"),
+            Self::HealingShrine => Some("Shrine of Healing"),
+            Self::LuckShrine => Some("Shrine of Fortune"),
+            _ => None,
+        }
     }
 
     /// Returns whether this tile blocks line of sight
@@ -354,15 +518,8 @@ impl Map {
             }
         }
 
-        // Add shrines
-        if rng.gen_bool(0.1 + level as f64 * 0.01) {
-            if let Some(room) = self.rooms.get(rng.gen_range(1..self.rooms.len())) {
-                let (x, y) = room.center();
-                if self.tiles[y][x].walkable() {
-                    self.tiles[y][x] = Tile::Shrine;
-                }
-            }
-        }
+        // Add shrines - multiple types with level-based spawning
+        self.spawn_shrines(rng, level);
 
         // Add water/lava pools based on theme
         match self.theme {
@@ -415,6 +572,137 @@ impl Map {
                 }
             }
         }
+    }
+
+    /// Spawns various shrine types throughout the dungeon
+    fn spawn_shrines(&mut self, rng: &mut impl Rng, level: u32) {
+        if self.rooms.len() < 2 {
+            return;
+        }
+
+        // Calculate number of shrines based on level
+        let base_shrine_chance = 0.15 + level as f64 * 0.02;
+        let max_shrines = 1 + (level / 5) as usize;
+        let mut shrines_placed = 0;
+
+        // Define shrine types with their spawn weights based on dungeon theme and level
+        let shrine_types: Vec<(Tile, f64)> = match self.theme {
+            DungeonTheme::Dungeon => vec![
+                (Tile::Shrine, 0.20),
+                (Tile::BlessingShrine, 0.15),
+                (Tile::HealingShrine, 0.20),
+                (Tile::StatShrine, 0.10),
+                (Tile::TeleportShrine, 0.10),
+                (Tile::ChaosShrine, 0.08),
+                (Tile::WarShrine, 0.10),
+                (Tile::WisdomShrine, 0.07),
+            ],
+            DungeonTheme::Cave => vec![
+                (Tile::Shrine, 0.15),
+                (Tile::StatShrine, 0.15),
+                (Tile::TeleportShrine, 0.20),
+                (Tile::ChaosShrine, 0.15),
+                (Tile::HealingShrine, 0.15),
+                (Tile::LuckShrine, 0.10),
+                (Tile::WarShrine, 0.10),
+            ],
+            DungeonTheme::Crypt => vec![
+                (Tile::CurseShrine, 0.20),
+                (Tile::SacrificeShrine, 0.20),
+                (Tile::Shrine, 0.10),
+                (Tile::WisdomShrine, 0.15),
+                (Tile::ChaosShrine, 0.15),
+                (Tile::HealingShrine, 0.10),
+                (Tile::BlessingShrine, 0.10),
+            ],
+            DungeonTheme::Forest => vec![
+                (Tile::HealingShrine, 0.25),
+                (Tile::BlessingShrine, 0.20),
+                (Tile::WisdomShrine, 0.15),
+                (Tile::Shrine, 0.15),
+                (Tile::StatShrine, 0.10),
+                (Tile::LuckShrine, 0.15),
+            ],
+            DungeonTheme::IceCavern => vec![
+                (Tile::WisdomShrine, 0.20),
+                (Tile::TeleportShrine, 0.15),
+                (Tile::StatShrine, 0.15),
+                (Tile::HealingShrine, 0.15),
+                (Tile::Shrine, 0.15),
+                (Tile::ChaosShrine, 0.10),
+                (Tile::LuckShrine, 0.10),
+            ],
+            DungeonTheme::VolcanicLair => vec![
+                (Tile::WarShrine, 0.25),
+                (Tile::SacrificeShrine, 0.20),
+                (Tile::ChaosShrine, 0.15),
+                (Tile::StatShrine, 0.15),
+                (Tile::Shrine, 0.10),
+                (Tile::CurseShrine, 0.15),
+            ],
+            DungeonTheme::AncientRuins => vec![
+                (Tile::WisdomShrine, 0.25),
+                (Tile::BlessingShrine, 0.15),
+                (Tile::StatShrine, 0.15),
+                (Tile::TeleportShrine, 0.15),
+                (Tile::Shrine, 0.15),
+                (Tile::LuckShrine, 0.15),
+            ],
+            DungeonTheme::DemonRealm => vec![
+                (Tile::CurseShrine, 0.20),
+                (Tile::SacrificeShrine, 0.20),
+                (Tile::ChaosShrine, 0.20),
+                (Tile::WarShrine, 0.15),
+                (Tile::Shrine, 0.10),
+                (Tile::StatShrine, 0.15),
+            ],
+        };
+
+        // Try to place shrines in rooms
+        for room_idx in 1..self.rooms.len() {
+            if shrines_placed >= max_shrines {
+                break;
+            }
+
+            if rng.gen_bool(base_shrine_chance) {
+                let room = &self.rooms[room_idx];
+                let (x, y) = room.center();
+
+                if self.tiles[y][x].walkable() && !self.tiles[y][x].is_shrine() {
+                    // Choose shrine type based on weights
+                    let shrine_type = self.choose_weighted_shrine(rng, &shrine_types);
+                    self.tiles[y][x] = shrine_type;
+                    shrines_placed += 1;
+                }
+            }
+        }
+
+        // Guaranteed shrine on deeper levels (every 5 levels)
+        if level % 5 == 0 && shrines_placed == 0 && self.rooms.len() > 2 {
+            let room_idx = rng.gen_range(1..self.rooms.len() - 1);
+            let room = &self.rooms[room_idx];
+            let (x, y) = room.center();
+            if self.tiles[y][x].walkable() {
+                let shrine_type = self.choose_weighted_shrine(rng, &shrine_types);
+                self.tiles[y][x] = shrine_type;
+            }
+        }
+    }
+
+    /// Choose a shrine type based on weighted probabilities
+    fn choose_weighted_shrine(&self, rng: &mut impl Rng, weights: &[(Tile, f64)]) -> Tile {
+        let total_weight: f64 = weights.iter().map(|(_, w)| w).sum();
+        let mut roll = rng.gen::<f64>() * total_weight;
+
+        for (tile, weight) in weights {
+            roll -= weight;
+            if roll <= 0.0 {
+                return *tile;
+            }
+        }
+
+        // Fallback to generic shrine
+        Tile::Shrine
     }
 
     /// Compute field of view from a position

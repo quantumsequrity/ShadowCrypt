@@ -7,14 +7,684 @@ use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    style::{Color, Print, ResetColor, SetForegroundColor, SetBackgroundColor},
+    style::{Color, Print, ResetColor, SetForegroundColor, SetBackgroundColor, Attribute, SetAttribute},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use rand::prelude::*;
 use std::io::{stdout, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::collections::VecDeque;
 
 use shadowcrypt_core::prelude::*;
+
+// ============================================================================
+// COMBAT ANIMATION SYSTEM
+// ============================================================================
+
+/// Types of combat visual effects
+#[derive(Clone, Debug)]
+enum CombatEffectType {
+    /// Player deals damage to enemy
+    PlayerHit { damage: i32, is_critical: bool },
+    /// Enemy deals damage to player
+    EnemyHit { damage: i32 },
+    /// Attack missed
+    Miss,
+    /// Attack was blocked/dodged
+    Block,
+    /// Healing effect
+    Heal { amount: i32 },
+    /// Skill activation
+    SkillUse { skill_name: String },
+    /// Enemy death
+    Death { enemy_name: String },
+    /// Player level up
+    LevelUp,
+    /// Status effect applied
+    StatusApplied { effect_name: String },
+    /// Projectile/ranged attack
+    Projectile { from_x: usize, from_y: usize, to_x: usize, to_y: usize },
+}
+
+/// A combat effect with position and timing
+#[derive(Clone, Debug)]
+struct CombatEffect {
+    x: usize,
+    y: usize,
+    effect_type: CombatEffectType,
+    created_at: Instant,
+    duration_ms: u64,
+}
+
+impl CombatEffect {
+    fn new(x: usize, y: usize, effect_type: CombatEffectType, duration_ms: u64) -> Self {
+        Self {
+            x,
+            y,
+            effect_type,
+            created_at: Instant::now(),
+            duration_ms,
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        self.created_at.elapsed().as_millis() as u64 > self.duration_ms
+    }
+
+    fn progress(&self) -> f32 {
+        let elapsed = self.created_at.elapsed().as_millis() as f32;
+        (elapsed / self.duration_ms as f32).min(1.0)
+    }
+}
+
+/// Manages all active combat animations
+struct CombatAnimator {
+    effects: VecDeque<CombatEffect>,
+    screen_shake: Option<(Instant, u64, i8)>, // start time, duration, intensity
+    border_flash: Option<(Instant, u64, Color)>, // start time, duration, color
+    last_combat_message: Option<String>,
+    combo_count: u32,
+    combo_timer: Option<Instant>,
+}
+
+impl CombatAnimator {
+    fn new() -> Self {
+        Self {
+            effects: VecDeque::new(),
+            screen_shake: None,
+            border_flash: None,
+            last_combat_message: None,
+            combo_count: 0,
+            combo_timer: None,
+        }
+    }
+
+    /// Add a new combat effect
+    fn add_effect(&mut self, x: usize, y: usize, effect_type: CombatEffectType) {
+        let duration = match &effect_type {
+            CombatEffectType::PlayerHit { is_critical, .. } => {
+                if *is_critical { 600 } else { 400 }
+            }
+            CombatEffectType::EnemyHit { .. } => 350,
+            CombatEffectType::Miss => 300,
+            CombatEffectType::Block => 350,
+            CombatEffectType::Heal { .. } => 500,
+            CombatEffectType::SkillUse { .. } => 450,
+            CombatEffectType::Death { .. } => 700,
+            CombatEffectType::LevelUp => 1000,
+            CombatEffectType::StatusApplied { .. } => 400,
+            CombatEffectType::Projectile { .. } => 200,
+        };
+
+        self.effects.push_back(CombatEffect::new(x, y, effect_type, duration));
+
+        // Limit effects to prevent memory issues
+        while self.effects.len() > 20 {
+            self.effects.pop_front();
+        }
+    }
+
+    /// Trigger screen shake effect
+    fn shake_screen(&mut self, duration_ms: u64, intensity: i8) {
+        self.screen_shake = Some((Instant::now(), duration_ms, intensity));
+    }
+
+    /// Trigger border flash effect
+    fn flash_border(&mut self, duration_ms: u64, color: Color) {
+        self.border_flash = Some((Instant::now(), duration_ms, color));
+    }
+
+    /// Update combo counter
+    fn register_hit(&mut self) {
+        let now = Instant::now();
+        if let Some(timer) = self.combo_timer {
+            if timer.elapsed().as_millis() < 1500 {
+                self.combo_count += 1;
+            } else {
+                self.combo_count = 1;
+            }
+        } else {
+            self.combo_count = 1;
+        }
+        self.combo_timer = Some(now);
+    }
+
+    /// Get current combo count (0 if expired)
+    fn get_combo(&self) -> u32 {
+        if let Some(timer) = self.combo_timer {
+            if timer.elapsed().as_millis() < 1500 {
+                return self.combo_count;
+            }
+        }
+        0
+    }
+
+    /// Clean up expired effects
+    fn update(&mut self) {
+        self.effects.retain(|e| !e.is_expired());
+
+        if let Some((start, duration, _)) = self.screen_shake {
+            if start.elapsed().as_millis() as u64 > duration {
+                self.screen_shake = None;
+            }
+        }
+
+        if let Some((start, duration, _)) = self.border_flash {
+            if start.elapsed().as_millis() as u64 > duration {
+                self.border_flash = None;
+            }
+        }
+    }
+
+    /// Get screen shake offset
+    fn get_shake_offset(&self) -> (i8, i8) {
+        if let Some((start, duration, intensity)) = self.screen_shake {
+            let elapsed = start.elapsed().as_millis() as f32;
+            let progress = elapsed / duration as f32;
+            if progress < 1.0 {
+                let decay = 1.0 - progress;
+                let shake_x = ((elapsed * 0.1).sin() * intensity as f32 * decay) as i8;
+                let shake_y = ((elapsed * 0.15).cos() * intensity as f32 * decay * 0.5) as i8;
+                return (shake_x, shake_y);
+            }
+        }
+        (0, 0)
+    }
+
+    /// Check if border should flash
+    fn get_border_flash(&self) -> Option<Color> {
+        if let Some((start, duration, color)) = self.border_flash {
+            let elapsed = start.elapsed().as_millis() as u64;
+            if elapsed < duration {
+                // Pulse effect
+                let phase = (elapsed as f32 / 50.0).sin();
+                if phase > 0.0 {
+                    return Some(color);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Get the hit indicator character based on damage and timing
+fn get_hit_indicator(effect: &CombatEffect) -> (char, Color) {
+    let progress = effect.progress();
+
+    match &effect.effect_type {
+        CombatEffectType::PlayerHit { is_critical, .. } => {
+            if *is_critical {
+                let chars = ['*', 'X', '*', '+'];
+                let idx = ((progress * 4.0) as usize).min(3);
+                (chars[idx], Color::Yellow)
+            } else {
+                let chars = ['/', '\\', '|', '-'];
+                let idx = ((progress * 4.0) as usize).min(3);
+                (chars[idx], Color::White)
+            }
+        }
+        CombatEffectType::EnemyHit { .. } => {
+            let chars = ['!', '*', '!', '.'];
+            let idx = ((progress * 4.0) as usize).min(3);
+            (chars[idx], Color::Red)
+        }
+        CombatEffectType::Miss => ('o', Color::DarkGrey),
+        CombatEffectType::Block => ('#', Color::Cyan),
+        CombatEffectType::Death { .. } => {
+            let chars = ['%', '&', '#', '.'];
+            let idx = ((progress * 4.0) as usize).min(3);
+            (chars[idx], Color::DarkRed)
+        }
+        _ => (' ', Color::White),
+    }
+}
+
+/// Format damage number with styling
+fn format_damage_number(damage: i32, is_critical: bool, progress: f32) -> (String, Color, i16) {
+    let y_offset = (progress * 3.0) as i16; // Float upward
+
+    if is_critical {
+        (format!("*{}*", damage), Color::Yellow, -y_offset)
+    } else {
+        (format!("-{}", damage), Color::Red, -y_offset)
+    }
+}
+
+/// Format healing number
+fn format_heal_number(amount: i32, progress: f32) -> (String, Color, i16) {
+    let y_offset = (progress * 2.0) as i16;
+    (format!("+{}", amount), Color::Green, -y_offset)
+}
+
+// ============================================================================
+// MOVEMENT SYSTEM - Direction handling and movement state
+// ============================================================================
+
+/// Represents a movement direction with dx, dy offsets
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Direction {
+    dx: i32,
+    dy: i32,
+}
+
+impl Direction {
+    const NORTH: Direction = Direction { dx: 0, dy: -1 };
+    const SOUTH: Direction = Direction { dx: 0, dy: 1 };
+    const EAST: Direction = Direction { dx: 1, dy: 0 };
+    const WEST: Direction = Direction { dx: -1, dy: 0 };
+    const NORTHEAST: Direction = Direction { dx: 1, dy: -1 };
+    const NORTHWEST: Direction = Direction { dx: -1, dy: -1 };
+    const SOUTHEAST: Direction = Direction { dx: 1, dy: 1 };
+    const SOUTHWEST: Direction = Direction { dx: -1, dy: 1 };
+    const NONE: Direction = Direction { dx: 0, dy: 0 };
+
+    /// Get a descriptive name for the direction
+    fn name(&self) -> &'static str {
+        match (self.dx, self.dy) {
+            (0, -1) => "North",
+            (0, 1) => "South",
+            (1, 0) => "East",
+            (-1, 0) => "West",
+            (1, -1) => "NE",
+            (-1, -1) => "NW",
+            (1, 1) => "SE",
+            (-1, 1) => "SW",
+            _ => "",
+        }
+    }
+
+    /// Get an arrow symbol for the direction
+    fn arrow(&self) -> char {
+        match (self.dx, self.dy) {
+            (0, -1) => '^',
+            (0, 1) => 'v',
+            (1, 0) => '>',
+            (-1, 0) => '<',
+            (1, -1) => '/',   // NE: going up-right
+            (-1, -1) => '\\', // NW: going up-left
+            (1, 1) => '\\',   // SE: going down-right
+            (-1, 1) => '/',   // SW: going down-left
+            _ => '*',
+        }
+    }
+
+    /// Check if this is a diagonal direction
+    fn is_diagonal(&self) -> bool {
+        self.dx != 0 && self.dy != 0
+    }
+
+    /// Check if this is a valid movement direction (not stationary)
+    fn is_valid(&self) -> bool {
+        self.dx != 0 || self.dy != 0
+    }
+}
+
+/// Movement state for tracking running and last direction
+struct MovementState {
+    last_direction: Option<Direction>,
+    last_move_time: Instant,
+    is_running: bool,
+    run_direction: Option<Direction>,
+    move_count: u32,
+}
+
+impl MovementState {
+    fn new() -> Self {
+        Self {
+            last_direction: None,
+            last_move_time: Instant::now(),
+            is_running: false,
+            run_direction: None,
+            move_count: 0,
+        }
+    }
+
+    /// Record a movement
+    fn record_move(&mut self, dir: Direction) {
+        self.last_direction = Some(dir);
+        self.last_move_time = Instant::now();
+        self.move_count += 1;
+    }
+
+    /// Start running in a direction
+    fn start_run(&mut self, dir: Direction) {
+        self.is_running = true;
+        self.run_direction = Some(dir);
+    }
+
+    /// Stop running
+    fn stop_run(&mut self) {
+        self.is_running = false;
+        self.run_direction = None;
+    }
+
+    /// Check if we should continue running (no enemies visible, not blocked)
+    fn should_continue_run(&self, state: &GameState) -> bool {
+        if !self.is_running {
+            return false;
+        }
+
+        // Stop if any enemy is visible
+        for enemy in &state.enemies {
+            if enemy.is_alive() && state.map.visible[enemy.y][enemy.x] {
+                return false;
+            }
+        }
+
+        // Check if we can continue in the run direction
+        if let Some(dir) = self.run_direction {
+            let new_x = (state.player.x as i32 + dir.dx).max(0) as usize;
+            let new_y = (state.player.y as i32 + dir.dy).max(0) as usize;
+
+            // Stop at interesting tiles
+            let tile = state.map.tiles[new_y][new_x];
+            if matches!(tile, Tile::Door | Tile::Chest | Tile::Shrine | Tile::StairsDown | Tile::StairsUp | Tile::Trap) {
+                return false;
+            }
+
+            // Stop if blocked
+            if !state.map.is_walkable(new_x, new_y) {
+                return false;
+            }
+
+            // Stop if there's an item here
+            if state.items.iter().any(|i| i.x == new_x && i.y == new_y) {
+                return false;
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    /// Get movement indicator string for display
+    fn get_direction_indicator(&self) -> Option<(char, &'static str)> {
+        // Only show indicator if recent movement
+        if self.last_move_time.elapsed().as_millis() < 800 {
+            if let Some(dir) = self.last_direction {
+                return Some((dir.arrow(), dir.name()));
+            }
+        }
+        None
+    }
+}
+
+// ============================================================================
+// TARGETING SYSTEM
+// ============================================================================
+
+/// Information about a targetable enemy
+#[derive(Clone, Debug)]
+struct TargetInfo {
+    /// Index in the enemies vector
+    enemy_index: usize,
+    /// Enemy position
+    x: usize,
+    y: usize,
+    /// Distance from player (squared, for sorting)
+    distance_sq: i32,
+    /// Enemy name
+    name: String,
+    /// Current HP
+    hp: i32,
+    /// Max HP
+    max_hp: i32,
+    /// Is boss
+    is_boss: bool,
+    /// Attack stat
+    attack: i32,
+    /// Defense stat
+    defense: i32,
+    /// Active status effects
+    status_effects: Vec<(String, u32)>,
+}
+
+/// State for the targeting system
+struct TargetingState {
+    /// Whether targeting mode is active
+    active: bool,
+    /// Index of currently selected target in visible_targets
+    current_index: usize,
+    /// List of visible targetable enemies
+    visible_targets: Vec<TargetInfo>,
+    /// Time when targeting mode was activated (for blinking effect)
+    activated_at: Instant,
+    /// Whether target is locked (persists between turns)
+    locked: bool,
+}
+
+impl TargetingState {
+    fn new() -> Self {
+        Self {
+            active: false,
+            current_index: 0,
+            visible_targets: Vec::new(),
+            activated_at: Instant::now(),
+            locked: false,
+        }
+    }
+
+    /// Update the list of visible targets from the game state
+    fn update_targets(&mut self, state: &GameState) {
+        let px = state.player.x as i32;
+        let py = state.player.y as i32;
+
+        // Remember current target position if locked
+        let locked_pos = if self.locked {
+            self.current_target().map(|t| (t.x, t.y))
+        } else {
+            None
+        };
+
+        self.visible_targets.clear();
+
+        for (idx, enemy) in state.enemies.iter().enumerate() {
+            // Only include alive enemies that are visible
+            if enemy.is_alive() && state.map.visible[enemy.y][enemy.x] {
+                let dx = enemy.x as i32 - px;
+                let dy = enemy.y as i32 - py;
+                let distance_sq = dx * dx + dy * dy;
+
+                let status_effects: Vec<(String, u32)> = enemy
+                    .status_effects
+                    .iter()
+                    .map(|(e, d)| (e.name().to_string(), *d))
+                    .collect();
+
+                self.visible_targets.push(TargetInfo {
+                    enemy_index: idx,
+                    x: enemy.x,
+                    y: enemy.y,
+                    distance_sq,
+                    name: enemy.kind.name().to_string(),
+                    hp: enemy.hp,
+                    max_hp: enemy.max_hp,
+                    is_boss: enemy.kind.is_boss(),
+                    attack: enemy.attack,
+                    defense: enemy.defense,
+                    status_effects,
+                });
+            }
+        }
+
+        // Sort by distance (closest first)
+        self.visible_targets.sort_by_key(|t| t.distance_sq);
+
+        // Try to maintain locked target
+        if let Some((lx, ly)) = locked_pos {
+            if let Some(new_idx) = self.visible_targets.iter().position(|t| t.x == lx && t.y == ly) {
+                self.current_index = new_idx;
+            } else {
+                // Target no longer visible, unlock
+                self.locked = false;
+                self.current_index = 0;
+            }
+        }
+
+        // Validate current index
+        if self.current_index >= self.visible_targets.len() {
+            self.current_index = 0;
+        }
+
+        // If no targets available, deactivate targeting
+        if self.visible_targets.is_empty() {
+            self.active = false;
+            self.locked = false;
+        }
+    }
+
+    /// Activate targeting mode
+    fn activate(&mut self) {
+        if !self.visible_targets.is_empty() {
+            self.active = true;
+            self.activated_at = Instant::now();
+            if !self.locked {
+                self.current_index = 0;
+            }
+        }
+    }
+
+    /// Deactivate targeting mode
+    fn deactivate(&mut self) {
+        self.active = false;
+        self.locked = false;
+    }
+
+    /// Toggle targeting mode
+    fn toggle(&mut self) {
+        if self.active {
+            self.deactivate();
+        } else {
+            self.activate();
+        }
+    }
+
+    /// Cycle to the next target
+    fn next_target(&mut self) {
+        if !self.visible_targets.is_empty() {
+            self.current_index = (self.current_index + 1) % self.visible_targets.len();
+            if !self.active {
+                self.activate();
+            }
+        }
+    }
+
+    /// Cycle to the previous target
+    fn prev_target(&mut self) {
+        if !self.visible_targets.is_empty() {
+            if self.current_index == 0 {
+                self.current_index = self.visible_targets.len() - 1;
+            } else {
+                self.current_index -= 1;
+            }
+            if !self.active {
+                self.activate();
+            }
+        }
+    }
+
+    /// Lock/unlock the current target
+    fn toggle_lock(&mut self) {
+        if self.active && !self.visible_targets.is_empty() {
+            self.locked = !self.locked;
+        }
+    }
+
+    /// Get the currently selected target
+    fn current_target(&self) -> Option<&TargetInfo> {
+        if self.active && !self.visible_targets.is_empty() {
+            Some(&self.visible_targets[self.current_index])
+        } else {
+            None
+        }
+    }
+
+    /// Get the enemy index of the current target (for attacking)
+    fn current_enemy_index(&self) -> Option<usize> {
+        self.current_target().map(|t| t.enemy_index)
+    }
+
+    /// Check if a specific position is the current target
+    fn is_targeted(&self, x: usize, y: usize) -> bool {
+        if let Some(target) = self.current_target() {
+            target.x == x && target.y == y
+        } else {
+            false
+        }
+    }
+
+    /// Get blink state for target indicator (for animation)
+    fn should_show_indicator(&self) -> bool {
+        let elapsed = self.activated_at.elapsed().as_millis();
+        (elapsed / 200) % 2 == 0
+    }
+
+    /// Calculate direction from player to target
+    fn direction_to_target(&self, player_x: usize, player_y: usize) -> Option<(i32, i32)> {
+        self.current_target().map(|t| {
+            let dx = t.x as i32 - player_x as i32;
+            let dy = t.y as i32 - player_y as i32;
+            (dx.signum(), dy.signum())
+        })
+    }
+
+    /// Get number of visible targets
+    fn target_count(&self) -> usize {
+        self.visible_targets.len()
+    }
+
+    /// Check if an enemy at this position is adjacent to the player
+    fn is_adjacent(&self, player_x: usize, player_y: usize) -> bool {
+        if let Some(target) = self.current_target() {
+            let dx = (target.x as i32 - player_x as i32).abs();
+            let dy = (target.y as i32 - player_y as i32).abs();
+            dx <= 1 && dy <= 1
+        } else {
+            false
+        }
+    }
+}
+
+/// Parse key input to get direction
+fn key_to_direction(code: KeyCode) -> Option<Direction> {
+    match code {
+        // Arrow keys
+        KeyCode::Up => Some(Direction::NORTH),
+        KeyCode::Down => Some(Direction::SOUTH),
+        KeyCode::Left => Some(Direction::WEST),
+        KeyCode::Right => Some(Direction::EAST),
+
+        // WASD keys
+        KeyCode::Char('w') | KeyCode::Char('W') => Some(Direction::NORTH),
+        KeyCode::Char('s') | KeyCode::Char('S') => Some(Direction::SOUTH),
+        KeyCode::Char('a') | KeyCode::Char('A') => Some(Direction::WEST),
+        KeyCode::Char('d') | KeyCode::Char('D') => Some(Direction::EAST),
+
+        // Vi keys (hjkl)
+        KeyCode::Char('h') | KeyCode::Char('H') => Some(Direction::WEST),
+        KeyCode::Char('j') | KeyCode::Char('J') => Some(Direction::SOUTH),
+        KeyCode::Char('k') | KeyCode::Char('K') => Some(Direction::NORTH),
+        KeyCode::Char('l') | KeyCode::Char('L') => Some(Direction::EAST),
+
+        // Diagonal vi keys (yubn)
+        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Direction::NORTHWEST),
+        KeyCode::Char('u') | KeyCode::Char('U') => Some(Direction::NORTHEAST),
+        KeyCode::Char('b') | KeyCode::Char('B') => Some(Direction::SOUTHWEST),
+        KeyCode::Char('n') | KeyCode::Char('N') => Some(Direction::SOUTHEAST),
+
+        // Numpad movement (common roguelike standard)
+        // 7 8 9
+        // 4 . 6
+        // 1 2 3
+        KeyCode::Home => Some(Direction::NORTHWEST),     // Numpad 7
+        KeyCode::End => Some(Direction::SOUTHWEST),      // Numpad 1
+        KeyCode::PageUp => Some(Direction::NORTHEAST),   // Numpad 9
+        KeyCode::PageDown => Some(Direction::SOUTHEAST), // Numpad 3
+
+        _ => None,
+    }
+}
 
 // ============================================================================
 // RENDERING HELPERS - Convert core types to terminal display
@@ -37,6 +707,175 @@ fn status_color(effect: &StatusEffect) -> Color {
         StatusEffect::Invisibility => Color::Grey,
         StatusEffect::Confusion => Color::DarkYellow,
     }
+}
+
+/// Get the icon/symbol for a status effect
+fn status_icon(effect: &StatusEffect) -> &'static str {
+    match effect {
+        StatusEffect::Poison => "[P]",       // Poison vial
+        StatusEffect::Burn => "[~]",         // Flames
+        StatusEffect::Freeze => "[*]",       // Snowflake/ice crystal
+        StatusEffect::Bleed => "[%]",        // Blood drops
+        StatusEffect::Stun => "[!]",         // Stars/daze
+        StatusEffect::Blind => "[.]",        // Closed eyes
+        StatusEffect::Haste => "[>]",        // Speed arrows
+        StatusEffect::Shield => "[#]",       // Shield/barrier
+        StatusEffect::Regeneration => "[+]", // Healing plus
+        StatusEffect::Strength => "[^]",     // Power up arrow
+        StatusEffect::Weakness => "[v]",     // Power down arrow
+        StatusEffect::Invisibility => "[?]", // Fading/ghost
+        StatusEffect::Confusion => "[&]",    // Spiral/swirl
+    }
+}
+
+/// Get the background color for status effect highlighting
+fn status_bg_color(effect: &StatusEffect) -> Option<Color> {
+    if effect.is_harmful() {
+        Some(Color::Rgb { r: 60, g: 0, b: 0 })  // Dark red background for harmful
+    } else if effect.is_beneficial() {
+        Some(Color::Rgb { r: 0, g: 40, b: 0 })  // Dark green background for beneficial
+    } else {
+        None
+    }
+}
+
+/// Get the urgency indicator based on remaining duration
+fn duration_urgency(duration: u32) -> (&'static str, Color) {
+    match duration {
+        1 => ("!", Color::Red),           // About to expire - critical
+        2 => (":", Color::Yellow),        // Low duration - warning
+        3..=5 => (".", Color::White),     // Medium duration
+        _ => (" ", Color::Green),         // High duration - stable
+    }
+}
+
+/// Get a visual timer bar for the duration
+fn duration_bar(duration: u32, max_expected: u32) -> String {
+    let bar_width = 3;
+    let filled = ((duration as f32 / max_expected as f32) * bar_width as f32).ceil() as usize;
+    let filled = filled.min(bar_width);
+    let empty = bar_width.saturating_sub(filled);
+    format!("{}{}", "|".repeat(filled), ".".repeat(empty))
+}
+
+/// Determine if an effect should pulse/blink (for low duration warning)
+fn should_pulse_effect(duration: u32, turn_count: u64) -> bool {
+    duration <= 2 && (turn_count % 2 == 0)
+}
+
+/// Get abbreviated name for status effect display
+fn status_abbrev(effect: &StatusEffect) -> &'static str {
+    match effect {
+        StatusEffect::Poison => "PSN",
+        StatusEffect::Burn => "BRN",
+        StatusEffect::Freeze => "FRZ",
+        StatusEffect::Bleed => "BLD",
+        StatusEffect::Stun => "STN",
+        StatusEffect::Blind => "BLN",
+        StatusEffect::Haste => "HST",
+        StatusEffect::Shield => "SHD",
+        StatusEffect::Regeneration => "RGN",
+        StatusEffect::Strength => "STR",
+        StatusEffect::Weakness => "WEK",
+        StatusEffect::Invisibility => "INV",
+        StatusEffect::Confusion => "CNF",
+    }
+}
+
+/// Render a single status effect with all visual enhancements
+fn render_status_effect(
+    stdout: &mut std::io::Stdout,
+    effect: &StatusEffect,
+    duration: u32,
+    turn_count: u64,
+) -> std::io::Result<()> {
+    let color = status_color(effect);
+    let icon = status_icon(effect);
+    let abbrev = status_abbrev(effect);
+    let (urgency_char, urgency_color) = duration_urgency(duration);
+    let bar = duration_bar(duration, 10);
+    let pulse = should_pulse_effect(duration, turn_count);
+
+    // Apply background color for effect type
+    if let Some(bg) = status_bg_color(effect) {
+        execute!(stdout, SetBackgroundColor(bg))?;
+    }
+
+    // Icon with effect color
+    execute!(stdout, SetForegroundColor(color))?;
+    if pulse {
+        execute!(stdout, SetAttribute(Attribute::Bold))?;
+    }
+    write!(stdout, "{}", icon)?;
+
+    // Abbreviated name
+    write!(stdout, "{}", abbrev)?;
+
+    // Duration timer with urgency color
+    execute!(stdout, SetForegroundColor(urgency_color))?;
+    write!(stdout, "{}", urgency_char)?;
+    write!(stdout, "{}", duration)?;
+
+    // Duration bar
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "{}", bar)?;
+
+    // Reset styling
+    execute!(stdout, ResetColor, SetAttribute(Attribute::Reset))?;
+    write!(stdout, " ")?;
+
+    Ok(())
+}
+
+/// Render the complete status effects bar with enhanced visuals
+fn render_status_effects_bar(
+    stdout: &mut std::io::Stdout,
+    status_effects: &std::collections::HashMap<StatusEffect, u32>,
+    turn_count: u64,
+) -> std::io::Result<()> {
+    if status_effects.is_empty() {
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "(no active effects)")?;
+        execute!(stdout, ResetColor)?;
+        return Ok(());
+    }
+
+    // Separate harmful and beneficial effects
+    let mut harmful: Vec<_> = status_effects.iter()
+        .filter(|(e, _)| e.is_harmful())
+        .collect();
+    let mut beneficial: Vec<_> = status_effects.iter()
+        .filter(|(e, _)| e.is_beneficial())
+        .collect();
+
+    // Sort by duration (lowest first for urgency)
+    harmful.sort_by_key(|(_, d)| *d);
+    beneficial.sort_by_key(|(_, d)| *d);
+
+    // Render harmful effects first (more urgent)
+    if !harmful.is_empty() {
+        execute!(stdout, SetForegroundColor(Color::Red))?;
+        write!(stdout, "[-]")?;
+        execute!(stdout, ResetColor)?;
+        for (effect, duration) in &harmful {
+            render_status_effect(stdout, effect, **duration, turn_count)?;
+        }
+    }
+
+    // Render beneficial effects
+    if !beneficial.is_empty() {
+        if !harmful.is_empty() {
+            write!(stdout, " ")?;
+        }
+        execute!(stdout, SetForegroundColor(Color::Green))?;
+        write!(stdout, "[+]")?;
+        execute!(stdout, ResetColor)?;
+        for (effect, duration) in &beneficial {
+            render_status_effect(stdout, effect, **duration, turn_count)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Get the terminal glyph for a tile
@@ -369,38 +1208,100 @@ fn color_from_index(index: u8) -> Color {
 // ============================================================================
 
 fn render(state: &GameState) -> std::io::Result<()> {
+    render_full(state, None, None)
+}
+
+fn render_with_movement(state: &GameState, movement: Option<&MovementState>) -> std::io::Result<()> {
+    render_full(state, movement, None)
+}
+
+fn render_with_targeting(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>) -> std::io::Result<()> {
+    render_full(state, movement, targeting)
+}
+
+fn render_full(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>) -> std::io::Result<()> {
     let mut stdout = stdout();
     execute!(stdout, MoveTo(0, 0))?;
+
+    // Check if we should show target indicator (blinking)
+    let show_target_indicator = targeting
+        .map(|t| t.active && t.should_show_indicator())
+        .unwrap_or(false);
 
     // Render map
     for y in 0..MAP_HEIGHT.min(43) {
         execute!(stdout, MoveTo(0, y as u16))?;
 
         for x in 0..MAP_WIDTH.min(100) {
-            // Player
+            // Player - with direction indicator for recent movement
             if state.player.x == x && state.player.y == y {
-                execute!(
-                    stdout,
-                    SetForegroundColor(Color::Yellow),
-                    Print('@'),
-                    ResetColor
-                )?;
+                // Check if we should show a directional indicator
+                let show_direction = movement
+                    .and_then(|m| m.get_direction_indicator())
+                    .filter(|_| movement.map_or(false, |m| m.last_move_time.elapsed().as_millis() < 150));
+
+                if let Some((arrow, _name)) = show_direction {
+                    // Brief directional flash after movement
+                    execute!(
+                        stdout,
+                        SetForegroundColor(Color::Cyan),
+                        Print(arrow),
+                        ResetColor
+                    )?;
+                } else {
+                    // Normal player display
+                    let player_color = if movement.map_or(false, |m| m.is_running) {
+                        Color::Green // Running indicator
+                    } else if targeting.map(|t| t.active).unwrap_or(false) {
+                        Color::Magenta // Targeting mode indicator
+                    } else {
+                        Color::Yellow
+                    };
+                    execute!(
+                        stdout,
+                        SetForegroundColor(player_color),
+                        Print('@'),
+                        ResetColor
+                    )?;
+                }
             }
-            // Enemies
+            // Enemies - with targeting highlight
             else if let Some(enemy) = state.enemies.iter()
                 .find(|e| e.x == x && e.y == y && e.is_alive() && state.map.visible[y][x])
             {
-                let color = if enemy.kind.is_boss() {
-                    Color::Red
+                let is_targeted = targeting.map(|t| t.is_targeted(x, y)).unwrap_or(false);
+
+                if is_targeted && show_target_indicator {
+                    // Highlighted target - show with brackets and background
+                    let is_locked = targeting.map(|t| t.locked).unwrap_or(false);
+                    let bg_color = if is_locked {
+                        Color::DarkRed
+                    } else {
+                        Color::DarkMagenta
+                    };
+                    execute!(
+                        stdout,
+                        SetBackgroundColor(bg_color),
+                        SetForegroundColor(Color::White),
+                        SetAttribute(Attribute::Bold),
+                        Print(enemy_glyph(&enemy.kind)),
+                        SetAttribute(Attribute::Reset),
+                        ResetColor
+                    )?;
                 } else {
-                    enemy_color(&enemy.kind)
-                };
-                execute!(
-                    stdout,
-                    SetForegroundColor(color),
-                    Print(enemy_glyph(&enemy.kind)),
-                    ResetColor
-                )?;
+                    // Normal enemy display
+                    let color = if enemy.kind.is_boss() {
+                        Color::Red
+                    } else {
+                        enemy_color(&enemy.kind)
+                    };
+                    execute!(
+                        stdout,
+                        SetForegroundColor(color),
+                        Print(enemy_glyph(&enemy.kind)),
+                        ResetColor
+                    )?;
+                }
             }
             // Items
             else if let Some(item) = state.items.iter()
@@ -499,21 +1400,33 @@ fn render(state: &GameState) -> std::io::Result<()> {
 
     execute!(stdout, ResetColor)?;
 
-    // Status effects (line 44)
+    // Status effects and movement indicator (line 44)
     execute!(
         stdout,
         MoveTo(0, stats_y + 1),
         Clear(ClearType::CurrentLine)
     )?;
 
-    if !state.player.status_effects.is_empty() {
-        write!(stdout, "Status: ")?;
-        for (effect, duration) in &state.player.status_effects {
-            execute!(stdout, SetForegroundColor(status_color(effect)))?;
-            write!(stdout, "{}({}) ", effect.name(), duration)?;
+    // Show running indicator if applicable
+    if let Some(mv) = movement {
+        if mv.is_running {
+            execute!(stdout, SetForegroundColor(Color::Green))?;
+            if let Some(dir) = mv.run_direction {
+                write!(stdout, "[RUNNING {}] ", dir.name())?;
+            } else {
+                write!(stdout, "[RUNNING] ")?;
+            }
+            execute!(stdout, ResetColor)?;
+        } else if let Some((arrow, name)) = mv.get_direction_indicator() {
+            execute!(stdout, SetForegroundColor(Color::Cyan))?;
+            write!(stdout, "[{} {}] ", arrow, name)?;
+            execute!(stdout, ResetColor)?;
         }
-        execute!(stdout, ResetColor)?;
     }
+
+    // Enhanced status effects display
+    write!(stdout, "Effects: ")?;
+    render_status_effects_bar(&mut stdout, &state.player.status_effects, state.turn_count)?;
 
     // Messages (lines 45-50)
     for (i, msg) in state.messages.iter().enumerate() {
@@ -536,15 +1449,31 @@ fn render(state: &GameState) -> std::io::Result<()> {
         )?;
     }
 
-    // Controls hint
+    // Controls hint - different when targeting
     execute!(
         stdout,
         MoveTo(0, stats_y + 8),
         Clear(ClearType::CurrentLine),
-        SetForegroundColor(Color::DarkGrey),
-        Print("[WASD:Move] [Space:Skill] [Tab:CycleSkill] [I:Inventory] [>:Descend] [<:Ascend] [?:Help] [Q:Quit]"),
-        ResetColor
+        SetForegroundColor(Color::DarkGrey)
     )?;
+
+    if targeting.map(|t| t.active).unwrap_or(false) {
+        write!(stdout, "[Tab/Shift+Tab:Cycle] [t:Lock] [f:Attack] [Space:Skill] [Esc:Cancel] ")?;
+        let count = targeting.map(|t| t.target_count()).unwrap_or(0);
+        let idx = targeting.map(|t| t.current_index + 1).unwrap_or(0);
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "Target {}/{}", idx, count)?;
+    } else {
+        write!(stdout, "[WASD/Arrows:Move] [Tab:Target] [Space:Skill] [I:Inv] [?:Help]")?;
+    }
+    execute!(stdout, ResetColor)?;
+
+    // Target info panel (on right side of screen when targeting is active)
+    if let Some(ts) = targeting {
+        if ts.active {
+            render_target_info(&mut stdout, ts)?;
+        }
+    }
 
     // Inventory screen
     if state.show_inventory {
@@ -557,6 +1486,154 @@ fn render(state: &GameState) -> std::io::Result<()> {
     }
 
     stdout.flush()?;
+    Ok(())
+}
+
+/// Render the target information panel
+fn render_target_info(stdout: &mut std::io::Stdout, targeting: &TargetingState) -> std::io::Result<()> {
+    if let Some(target) = targeting.current_target() {
+        let panel_x = 70u16; // Right side of screen
+        let panel_y = 2u16;
+        let panel_width = 28;
+
+        // Panel border and background
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+
+        // Top border
+        execute!(stdout, MoveTo(panel_x, panel_y))?;
+        write!(stdout, "+{}+", "-".repeat(panel_width - 2))?;
+
+        // Title
+        execute!(stdout, MoveTo(panel_x, panel_y + 1))?;
+        write!(stdout, "|")?;
+        execute!(stdout, SetForegroundColor(Color::Yellow), SetAttribute(Attribute::Bold))?;
+        let title = if targeting.locked { " [LOCKED] TARGET " } else { " TARGET INFO " };
+        write!(stdout, "{:^width$}", title, width = panel_width - 2)?;
+        execute!(stdout, SetAttribute(Attribute::Reset), SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "|")?;
+
+        // Separator
+        execute!(stdout, MoveTo(panel_x, panel_y + 2))?;
+        write!(stdout, "+{}+", "-".repeat(panel_width - 2))?;
+
+        // Enemy name
+        execute!(stdout, MoveTo(panel_x, panel_y + 3))?;
+        write!(stdout, "|")?;
+        let name_color = if target.is_boss { Color::Red } else { Color::White };
+        execute!(stdout, SetForegroundColor(name_color), SetAttribute(Attribute::Bold))?;
+        let display_name = if target.is_boss {
+            format!("** {} **", target.name)
+        } else {
+            target.name.clone()
+        };
+        write!(stdout, " {:<width$}", display_name, width = panel_width - 3)?;
+        execute!(stdout, SetAttribute(Attribute::Reset), SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "|")?;
+
+        // HP bar
+        execute!(stdout, MoveTo(panel_x, panel_y + 4))?;
+        write!(stdout, "|")?;
+        let hp_pct = (target.hp as f32 / target.max_hp as f32 * 100.0) as i32;
+        let hp_color = if hp_pct <= 25 {
+            Color::Red
+        } else if hp_pct <= 50 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+        execute!(stdout, SetForegroundColor(hp_color))?;
+
+        // Visual HP bar
+        let bar_width = 12;
+        let filled = ((target.hp as f32 / target.max_hp as f32) * bar_width as f32) as usize;
+        let empty = bar_width - filled;
+        write!(stdout, " HP: [")?;
+        for _ in 0..filled {
+            write!(stdout, "#")?;
+        }
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        for _ in 0..empty {
+            write!(stdout, "-")?;
+        }
+        execute!(stdout, SetForegroundColor(hp_color))?;
+        write!(stdout, "]")?;
+
+        // HP numbers
+        execute!(stdout, SetForegroundColor(Color::White))?;
+        write!(stdout, " {:>3}", target.hp)?;
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, " |")?;
+
+        // Stats line
+        execute!(stdout, MoveTo(panel_x, panel_y + 5))?;
+        write!(stdout, "|")?;
+        execute!(stdout, SetForegroundColor(Color::Red))?;
+        write!(stdout, " ATK:{:<3}", target.attack)?;
+        execute!(stdout, SetForegroundColor(Color::Blue))?;
+        write!(stdout, " DEF:{:<3}", target.defense)?;
+
+        // Distance
+        let dist = (target.distance_sq as f32).sqrt() as i32;
+        execute!(stdout, SetForegroundColor(Color::Grey))?;
+        write!(stdout, " Dist:{:<2}", dist)?;
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "  |")?;
+
+        // Status effects
+        execute!(stdout, MoveTo(panel_x, panel_y + 6))?;
+        write!(stdout, "|")?;
+        if !target.status_effects.is_empty() {
+            execute!(stdout, SetForegroundColor(Color::Magenta))?;
+            write!(stdout, " ")?;
+            for (effect, dur) in target.status_effects.iter().take(3) {
+                let abbrev = match effect.as_str() {
+                    "Poison" => "PSN",
+                    "Burn" => "BRN",
+                    "Freeze" => "FRZ",
+                    "Stun" => "STN",
+                    "Bleed" => "BLD",
+                    _ => &effect[..3.min(effect.len())],
+                };
+                write!(stdout, "{}:{} ", abbrev, dur)?;
+            }
+            // Pad remaining space
+            let effects_len = target.status_effects.iter()
+                .take(3)
+                .map(|(e, d)| {
+                    let abbrev_len = match e.as_str() {
+                        "Poison" | "Freeze" => 3,
+                        "Burn" | "Stun" | "Bleed" => 3,
+                        _ => 3.min(e.len()),
+                    };
+                    abbrev_len + 1 + d.to_string().len() + 1
+                })
+                .sum::<usize>();
+            let remaining = (panel_width - 3).saturating_sub(effects_len + 1);
+            write!(stdout, "{:width$}", "", width = remaining)?;
+        } else {
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, " (no effects){:width$}", "", width = panel_width - 15)?;
+        }
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "|")?;
+
+        // Bottom border
+        execute!(stdout, MoveTo(panel_x, panel_y + 7))?;
+        write!(stdout, "+{}+", "-".repeat(panel_width - 2))?;
+
+        // Action hints
+        execute!(stdout, MoveTo(panel_x, panel_y + 8))?;
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        let dist = (target.distance_sq as f32).sqrt();
+        if dist < 1.5 {
+            write!(stdout, " [f] Melee attack")?;
+        } else {
+            write!(stdout, " Move closer to attack")?;
+        }
+
+        execute!(stdout, ResetColor)?;
+    }
+
     Ok(())
 }
 
@@ -663,30 +1740,29 @@ fn render_help(_state: &GameState) -> std::io::Result<()> {
     let help_text = [
         ("", ""),
         ("MOVEMENT:", ""),
-        ("  WASD / Arrow Keys / HJKL", "Move in 4 directions"),
-        ("  YUBN", "Move diagonally"),
+        ("  WASD / Arrow Keys", "Move in 4 directions"),
+        ("  HJKL (Vi-keys)", "Move in 4 directions"),
+        ("  YUBN (Vi-diagonal)", "Move diagonally (NW/NE/SW/SE)"),
+        ("  Home/End/PgUp/PgDn", "Diagonal numpad movement"),
+        ("  Shift + Direction", "Run (move until blocked/enemy)"),
+        ("  5 or Period (.)", "Wait one turn"),
         ("", ""),
         ("ACTIONS:", ""),
         ("  Space", "Use current skill"),
         ("  Tab", "Cycle through skills"),
         ("  I", "Open/close inventory"),
         ("  1-9, 0", "Use item from inventory"),
-        ("  > or .", "Descend stairs"),
-        ("  < or ,", "Ascend stairs"),
+        ("  > (Shift+.)", "Descend stairs"),
+        ("  < (Shift+,)", "Ascend stairs"),
         ("  ?", "Toggle this help screen"),
         ("  Q or ESC", "Quit game"),
         ("", ""),
         ("SYMBOLS:", ""),
-        ("  @", "You (the player)"),
+        ("  @", "You (green @ when running)"),
         ("  #", "Wall"),
-        ("  .", "Floor"),
-        ("  +", "Closed door"),
-        ("  /", "Open door"),
-        ("  >", "Stairs down"),
-        ("  <", "Stairs up"),
-        ("  $", "Chest"),
-        ("  ^", "Trap"),
-        ("  *", "Shrine"),
+        ("  +/", "Closed/Open door"),
+        ("  ><", "Stairs down/up"),
+        ("  $^*", "Chest/Trap/Shrine"),
         ("", ""),
         ("GOAL: Descend to level 30 and defeat the Demon King!", ""),
     ];
@@ -794,10 +1870,18 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut state = GameState::new(selected_class);
+    let mut movement_state = MovementState::new();
+    let mut last_render = Instant::now();
 
-    // Game loop
+    // Game loop - optimized for responsiveness
     loop {
-        render(&state)?;
+        // Render with movement state for direction indicators
+        // Only re-render if enough time has passed or state changed
+        let should_render = last_render.elapsed().as_millis() > 16; // ~60fps cap
+        if should_render {
+            render_with_movement(&state, Some(&movement_state))?;
+            last_render = Instant::now();
+        }
 
         if state.game_over || state.victory {
             if auto_play {
@@ -826,12 +1910,28 @@ fn main() -> std::io::Result<()> {
             continue;
         }
 
-        if event::poll(Duration::from_millis(50))? {
+        // Handle running mode - auto-continue movement
+        if movement_state.should_continue_run(&state) {
+            if let Some(dir) = movement_state.run_direction {
+                state.move_player(dir.dx, dir.dy);
+                movement_state.record_move(dir);
+                // Brief delay for running animation
+                std::thread::sleep(Duration::from_millis(40));
+                continue;
+            }
+        } else {
+            movement_state.stop_run();
+        }
+
+        // Reduced poll timeout for snappier input response
+        if event::poll(Duration::from_millis(16))? {
             if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
+                let shift_held = modifiers.contains(KeyModifiers::SHIFT);
+
                 // Inventory mode
                 if state.show_inventory {
                     match code {
-                        KeyCode::Char('i') | KeyCode::Esc => state.show_inventory = false,
+                        KeyCode::Char('i') | KeyCode::Char('I') | KeyCode::Esc => state.show_inventory = false,
                         KeyCode::Char(c) if c.is_ascii_digit() => {
                             let idx = if c == '0' { 9 } else { (c as u8 - b'1') as usize };
                             state.use_item(idx);
@@ -850,40 +1950,69 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
 
-                // Normal mode
+                // Check for movement keys first
+                if let Some(dir) = key_to_direction(code) {
+                    if shift_held {
+                        // Start running in this direction
+                        movement_state.start_run(dir);
+                        state.move_player(dir.dx, dir.dy);
+                        movement_state.record_move(dir);
+                    } else {
+                        // Normal single-step movement
+                        movement_state.stop_run();
+                        state.move_player(dir.dx, dir.dy);
+                        movement_state.record_move(dir);
+                    }
+                    continue;
+                }
+
+                // Normal mode - non-movement actions
                 match code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => break,
 
-                    // Movement
-                    KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('k') => state.move_player(0, -1),
-                    KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('j') => state.move_player(0, 1),
-                    KeyCode::Left | KeyCode::Char('a') | KeyCode::Char('h') => state.move_player(-1, 0),
-                    KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('l') => state.move_player(1, 0),
-
-                    // Diagonal
-                    KeyCode::Char('y') => state.move_player(-1, -1),
-                    KeyCode::Char('u') => state.move_player(1, -1),
-                    KeyCode::Char('b') => state.move_player(-1, 1),
-                    KeyCode::Char('n') => state.move_player(1, 1),
+                    // Wait/Rest action (5 or . without shift)
+                    KeyCode::Char('5') => {
+                        state.end_turn();
+                        movement_state.stop_run();
+                    }
+                    KeyCode::Char('.') if !shift_held => {
+                        state.end_turn();
+                        movement_state.stop_run();
+                    }
 
                     // Skills
-                    KeyCode::Char(' ') => state.use_skill(),
+                    KeyCode::Char(' ') => {
+                        state.use_skill();
+                        movement_state.stop_run();
+                    }
                     KeyCode::Tab => state.cycle_skill(),
 
-                    // Stairs
-                    KeyCode::Char('>') | KeyCode::Char('.') => state.descend(),
-                    KeyCode::Char('<') | KeyCode::Char(',') => state.ascend(),
+                    // Stairs (> requires shift)
+                    KeyCode::Char('>') => {
+                        state.descend();
+                        movement_state.stop_run();
+                    }
+                    KeyCode::Char('<') => {
+                        state.ascend();
+                        movement_state.stop_run();
+                    }
 
                     // Inventory
-                    KeyCode::Char('i') => state.show_inventory = true,
+                    KeyCode::Char('i') | KeyCode::Char('I') => state.show_inventory = true,
                     KeyCode::Char(c) if c.is_ascii_digit() => {
                         let idx = if c == '0' { 9 } else { (c as u8 - b'1') as usize };
                         state.use_item(idx);
+                        movement_state.stop_run();
                     }
 
                     // Help
                     KeyCode::Char('?') => state.show_help = true,
+
+                    // Grab/pickup explicitly (g key - common roguelike binding)
+                    KeyCode::Char('g') | KeyCode::Char('G') => {
+                        state.pickup_items();
+                    }
 
                     _ => {}
                 }

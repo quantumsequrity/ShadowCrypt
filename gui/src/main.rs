@@ -1,12 +1,1251 @@
-//! ShadowCrypt GUI - Graphical frontend for the roguelike game
+//! ShadowCrypt GUI - Graphical frontend with advanced lighting and fog of war
 //!
-//! This GUI uses egui/eframe for rendering, importing all game logic
-//! from shadowcrypt-core.
+//! This GUI uses egui/eframe for rendering and includes a sophisticated
+//! lighting system with torch radius, darkness gradients, and atmospheric fog.
+//! Features a detailed character panel showing stats, equipment, skills, and resistances.
 
+use eframe::egui::{self, Color32, FontId, RichText, Rounding, Sense, Stroke, Vec2};
 use shadowcrypt_core::prelude::*;
+use shadowcrypt_core::ai::{AIAction, AutoPlayAI};
+use shadowcrypt_core::ui::{Color, tile_color, enemy_color, rarity_color};
+use shadowcrypt_core::combat::StatusEffect;
+use shadowcrypt_core::items::{EquipSlot, Rarity, ItemKind};
+use shadowcrypt_core::magic::Skill;
+use shadowcrypt_core::classes::CharacterClass;
+use std::collections::HashMap;
 
-fn main() {
-    println!("ShadowCrypt GUI");
-    println!("GUI implementation coming soon!");
-    println!("For now, please use the CLI version: cargo run -p shadowcrypt-cli");
+// ============================================================================
+// Lighting System
+// ============================================================================
+
+/// Configuration for the lighting system
+#[derive(Clone, Copy)]
+pub struct LightingConfig {
+    /// Base torch radius (in tiles)
+    pub torch_radius: f32,
+    /// Minimum light level (0.0 = pitch black, 1.0 = full bright)
+    pub ambient_light: f32,
+    /// How quickly light falls off with distance (higher = faster falloff)
+    pub falloff_exponent: f32,
+    /// Fog density (0.0 = no fog, 1.0 = very dense)
+    pub fog_density: f32,
+    /// Fog color
+    pub fog_color: Color,
+    /// Whether to enable flickering torch effect
+    pub torch_flicker: bool,
+    /// Light color tint from torch
+    pub torch_color: Color,
+    /// Remembered tile darkness (explored but not visible)
+    pub memory_darkness: f32,
+}
+
+impl Default for LightingConfig {
+    fn default() -> Self {
+        Self {
+            torch_radius: 8.0,
+            ambient_light: 0.02,
+            falloff_exponent: 1.8,
+            fog_density: 0.15,
+            fog_color: Color::new(20, 20, 40),
+            torch_flicker: true,
+            torch_color: Color::new(255, 220, 180),
+            memory_darkness: 0.75,
+        }
+    }
+}
+
+impl LightingConfig {
+    /// Get lighting config based on dungeon theme
+    pub fn for_theme(theme: DungeonTheme, dungeon_level: u32) -> Self {
+        let base = Self::default();
+        let depth_factor = (dungeon_level as f32 / 30.0).min(1.0);
+
+        match theme {
+            DungeonTheme::Dungeon => Self {
+                torch_radius: 8.0 - depth_factor * 1.5,
+                ambient_light: 0.03 - depth_factor * 0.02,
+                fog_density: 0.12 + depth_factor * 0.08,
+                fog_color: Color::new(15, 15, 25),
+                torch_color: Color::new(255, 200, 150),
+                ..base
+            },
+            DungeonTheme::Cave => Self {
+                torch_radius: 7.0,
+                ambient_light: 0.01,
+                fog_density: 0.20,
+                fog_color: Color::new(20, 25, 20),
+                torch_color: Color::new(255, 230, 180),
+                ..base
+            },
+            DungeonTheme::Crypt => Self {
+                torch_radius: 6.5,
+                ambient_light: 0.02,
+                fog_density: 0.25,
+                fog_color: Color::new(30, 25, 35),
+                torch_color: Color::new(200, 180, 255),
+                ..base
+            },
+            DungeonTheme::Forest => Self {
+                torch_radius: 9.0,
+                ambient_light: 0.08,
+                fog_density: 0.18,
+                fog_color: Color::new(20, 35, 25),
+                torch_color: Color::new(255, 240, 200),
+                ..base
+            },
+            DungeonTheme::IceCavern => Self {
+                torch_radius: 10.0,
+                ambient_light: 0.06,
+                fog_density: 0.22,
+                fog_color: Color::new(40, 50, 60),
+                torch_color: Color::new(200, 220, 255),
+                ..base
+            },
+            DungeonTheme::VolcanicLair => Self {
+                torch_radius: 7.5,
+                ambient_light: 0.10,
+                fog_density: 0.30,
+                fog_color: Color::new(50, 25, 15),
+                torch_color: Color::new(255, 150, 100),
+                ..base
+            },
+            DungeonTheme::AncientRuins => Self {
+                torch_radius: 8.0,
+                ambient_light: 0.04,
+                fog_density: 0.15,
+                fog_color: Color::new(40, 35, 25),
+                torch_color: Color::new(255, 220, 160),
+                ..base
+            },
+            DungeonTheme::DemonRealm => Self {
+                torch_radius: 6.0,
+                ambient_light: 0.05,
+                fog_density: 0.35,
+                fog_color: Color::new(40, 15, 20),
+                torch_color: Color::new(255, 100, 80),
+                falloff_exponent: 2.2,
+                ..base
+            },
+        }
+    }
+}
+
+/// Light source in the game world
+#[derive(Clone, Copy)]
+pub struct LightSource {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub intensity: f32,
+    pub color: Color,
+}
+
+/// The main lighting system that calculates light levels for tiles
+pub struct LightingSystem {
+    /// Cached light levels for visible tiles
+    light_map: Vec<Vec<f32>>,
+    /// Current lighting configuration
+    config: LightingConfig,
+    /// Animated time for effects
+    time: f32,
+    /// Flicker offset for torch
+    flicker_offset: f32,
+}
+
+impl LightingSystem {
+    pub fn new() -> Self {
+        Self {
+            light_map: vec![vec![0.0; MAP_WIDTH]; MAP_HEIGHT],
+            config: LightingConfig::default(),
+            time: 0.0,
+            flicker_offset: 0.0,
+        }
+    }
+
+    /// Update the lighting system (call each frame)
+    pub fn update(&mut self, delta_time: f32) {
+        self.time += delta_time;
+
+        // Calculate torch flicker using multiple sine waves for organic effect
+        if self.config.torch_flicker {
+            self.flicker_offset =
+                (self.time * 8.0).sin() * 0.05 +
+                (self.time * 13.0).sin() * 0.03 +
+                (self.time * 21.0).sin() * 0.02;
+        } else {
+            self.flicker_offset = 0.0;
+        }
+    }
+
+    /// Set the lighting configuration based on dungeon theme
+    pub fn set_theme(&mut self, theme: DungeonTheme, dungeon_level: u32) {
+        self.config = LightingConfig::for_theme(theme, dungeon_level);
+    }
+
+    /// Calculate light level at a specific position
+    pub fn calculate_light_at(&self, x: usize, y: usize, player_x: usize, player_y: usize,
+                              map: &Map, additional_lights: &[LightSource]) -> f32 {
+        // Start with ambient light
+        let mut light = self.config.ambient_light;
+
+        // Calculate distance from player (torch holder)
+        let dx = x as f32 - player_x as f32;
+        let dy = y as f32 - player_y as f32;
+        let distance = (dx * dx + dy * dy).sqrt();
+
+        // Apply torch light with falloff
+        let effective_radius = self.config.torch_radius * (1.0 + self.flicker_offset);
+        if distance < effective_radius {
+            // Smooth falloff using exponential decay
+            let normalized_dist = distance / effective_radius;
+            let torch_light = (1.0 - normalized_dist.powf(self.config.falloff_exponent)).max(0.0);
+            light += torch_light * (1.0 + self.flicker_offset * 0.5);
+        }
+
+        // Add light from additional sources (lava, shrines, etc.)
+        for source in additional_lights {
+            let sdx = x as f32 - source.x;
+            let sdy = y as f32 - source.y;
+            let sdist = (sdx * sdx + sdy * sdy).sqrt();
+            if sdist < source.radius {
+                let normalized = sdist / source.radius;
+                let source_light = (1.0 - normalized.powf(1.5)) * source.intensity;
+                light += source_light;
+            }
+        }
+
+        // Special tile lighting
+        if let Some(tile) = map.get_tile(x, y) {
+            match tile {
+                Tile::Lava => light += 0.4,
+                Tile::Shrine => light += 0.3,
+                Tile::BossGate => light += 0.2,
+                _ => {}
+            }
+        }
+
+        light.clamp(0.0, 1.0)
+    }
+
+    /// Calculate fog intensity at a position
+    pub fn calculate_fog_at(&self, x: usize, y: usize, player_x: usize, player_y: usize) -> f32 {
+        let dx = x as f32 - player_x as f32;
+        let dy = y as f32 - player_y as f32;
+        let distance = (dx * dx + dy * dy).sqrt();
+
+        // Fog increases with distance from player
+        let fog_start = self.config.torch_radius * 0.5;
+        let fog_end = self.config.torch_radius * 1.5;
+
+        if distance <= fog_start {
+            0.0
+        } else if distance >= fog_end {
+            self.config.fog_density
+        } else {
+            let t = (distance - fog_start) / (fog_end - fog_start);
+            t * self.config.fog_density
+        }
+    }
+
+    /// Apply lighting to a color
+    pub fn apply_lighting(&self, base_color: Color, light_level: f32, fog_amount: f32) -> Color {
+        // Apply light level (darken based on light)
+        let mut r = base_color.r as f32 * light_level;
+        let mut g = base_color.g as f32 * light_level;
+        let mut b = base_color.b as f32 * light_level;
+
+        // Apply torch color tint (warm light)
+        let tint_strength = light_level * 0.3;
+        r = r * (1.0 - tint_strength) + self.config.torch_color.r as f32 * tint_strength * (r / 255.0);
+        g = g * (1.0 - tint_strength) + self.config.torch_color.g as f32 * tint_strength * (g / 255.0);
+        b = b * (1.0 - tint_strength) + self.config.torch_color.b as f32 * tint_strength * (b / 255.0);
+
+        // Apply fog
+        r = r * (1.0 - fog_amount) + self.config.fog_color.r as f32 * fog_amount;
+        g = g * (1.0 - fog_amount) + self.config.fog_color.g as f32 * fog_amount;
+        b = b * (1.0 - fog_amount) + self.config.fog_color.b as f32 * fog_amount;
+
+        Color::new(
+            (r as u8).min(255),
+            (g as u8).min(255),
+            (b as u8).min(255),
+        )
+    }
+
+    /// Get the color for a remembered (explored but not visible) tile
+    pub fn get_memory_color(&self, base_color: Color) -> Color {
+        let darkness = self.config.memory_darkness;
+        Color::new(
+            ((base_color.r as f32 * (1.0 - darkness)) as u8).max(15),
+            ((base_color.g as f32 * (1.0 - darkness)) as u8).max(15),
+            ((base_color.b as f32 * (1.0 - darkness)) as u8).max(15),
+        )
+    }
+
+    /// Collect additional light sources from the map
+    pub fn collect_light_sources(&self, map: &Map, enemies: &[Enemy], view_x: usize, view_y: usize,
+                                  view_width: usize, view_height: usize) -> Vec<LightSource> {
+        let mut sources = Vec::new();
+
+        // Scan visible area for light-emitting tiles and entities
+        for y in view_y..(view_y + view_height).min(MAP_HEIGHT) {
+            for x in view_x..(view_x + view_width).min(MAP_WIDTH) {
+                if let Some(tile) = map.get_tile(x, y) {
+                    match tile {
+                        Tile::Lava => {
+                            sources.push(LightSource {
+                                x: x as f32 + 0.5,
+                                y: y as f32 + 0.5,
+                                radius: 3.5,
+                                intensity: 0.6,
+                                color: Color::new(255, 100, 50),
+                            });
+                        }
+                        Tile::Shrine => {
+                            sources.push(LightSource {
+                                x: x as f32 + 0.5,
+                                y: y as f32 + 0.5,
+                                radius: 4.0,
+                                intensity: 0.5,
+                                color: Color::new(200, 150, 255),
+                            });
+                        }
+                        Tile::BossGate => {
+                            sources.push(LightSource {
+                                x: x as f32 + 0.5,
+                                y: y as f32 + 0.5,
+                                radius: 5.0,
+                                intensity: 0.4,
+                                color: Color::new(255, 50, 50),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Fire-based enemies emit light
+        for enemy in enemies.iter().filter(|e| e.is_alive()) {
+            if enemy.x >= view_x && enemy.x < view_x + view_width &&
+               enemy.y >= view_y && enemy.y < view_y + view_height {
+                let light = match enemy.kind {
+                    EnemyKind::FireElemental | EnemyKind::FireDrake => Some((4.0, 0.5, Color::new(255, 150, 50))),
+                    EnemyKind::LavaGolem | EnemyKind::MagmaSlime => Some((3.5, 0.4, Color::new(255, 100, 30))),
+                    EnemyKind::Hellhound | EnemyKind::InfernalImp => Some((2.5, 0.3, Color::new(255, 120, 50))),
+                    EnemyKind::CinderWraith => Some((3.0, 0.35, Color::new(255, 80, 30))),
+                    EnemyKind::Salamander => Some((3.0, 0.4, Color::new(255, 130, 60))),
+                    EnemyKind::InfernalLord | EnemyKind::Balrog => Some((5.0, 0.6, Color::new(255, 80, 40))),
+                    EnemyKind::Ghost | EnemyKind::Wraith | EnemyKind::Banshee => Some((2.0, 0.2, Color::new(150, 200, 255))),
+                    EnemyKind::IceWraith => Some((2.5, 0.25, Color::new(100, 200, 255))),
+                    _ => None,
+                };
+
+                if let Some((radius, intensity, color)) = light {
+                    sources.push(LightSource {
+                        x: enemy.x as f32 + 0.5,
+                        y: enemy.y as f32 + 0.5,
+                        radius,
+                        intensity,
+                        color,
+                    });
+                }
+            }
+        }
+
+        sources
+    }
+
+    /// Get the current config
+    pub fn config(&self) -> &LightingConfig {
+        &self.config
+    }
+}
+
+impl Default for LightingSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// Settings System
+// ============================================================================
+
+/// Display settings for rendering
+#[derive(Clone, PartialEq)]
+pub struct DisplaySettings {
+    /// Size of each tile in pixels
+    pub tile_size: f32,
+    /// Zoom level multiplier
+    pub zoom_level: f32,
+    /// Show grid lines between tiles
+    pub show_grid: bool,
+    /// Enable smooth scrolling
+    pub smooth_scrolling: bool,
+    /// Show FPS counter
+    pub show_fps: bool,
+    /// Enable torch flicker effect
+    pub torch_flicker: bool,
+    /// UI scale factor
+    pub ui_scale: f32,
+    /// Enable vignette effect
+    pub enable_vignette: bool,
+    /// Vignette intensity (0.0-1.0)
+    pub vignette_intensity: f32,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self {
+            tile_size: 18.0,
+            zoom_level: 1.0,
+            show_grid: false,
+            smooth_scrolling: true,
+            show_fps: false,
+            torch_flicker: true,
+            ui_scale: 1.0,
+            enable_vignette: true,
+            vignette_intensity: 0.3,
+        }
+    }
+}
+
+/// Gameplay options
+#[derive(Clone, PartialEq)]
+pub struct GameplaySettings {
+    /// Automatically pick up gold
+    pub auto_pickup_gold: bool,
+    /// Automatically pick up items
+    pub auto_pickup_items: bool,
+    /// Automatically pick up food
+    pub auto_pickup_food: bool,
+    /// Confirm before descending stairs
+    pub confirm_stairs: bool,
+    /// Confirm before using dangerous items
+    pub confirm_dangerous_items: bool,
+    /// Confirm before attacking
+    pub confirm_attack: bool,
+    /// Show damage numbers floating above targets
+    pub show_damage_numbers: bool,
+    /// Auto-explore when pressing a key
+    pub auto_explore: bool,
+    /// Show tutorial tips
+    pub show_tips: bool,
+    /// Message log size
+    pub message_log_size: usize,
+    /// Auto-play speed (ms between actions)
+    pub auto_play_speed: u32,
+}
+
+impl Default for GameplaySettings {
+    fn default() -> Self {
+        Self {
+            auto_pickup_gold: true,
+            auto_pickup_items: false,
+            auto_pickup_food: true,
+            confirm_stairs: true,
+            confirm_dangerous_items: true,
+            confirm_attack: false,
+            show_damage_numbers: true,
+            auto_explore: true,
+            show_tips: true,
+            message_log_size: 6,
+            auto_play_speed: 100,
+        }
+    }
+}
+
+/// A single keybinding entry for display
+#[derive(Clone)]
+pub struct Keybinding {
+    pub action: String,
+    pub primary: String,
+    pub secondary: Option<String>,
+    pub category: KeybindingCategory,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum KeybindingCategory {
+    Movement,
+    Actions,
+    Inventory,
+    Interface,
+}
+
+impl Keybinding {
+    pub fn new(action: &str, primary: &str, secondary: Option<&str>, category: KeybindingCategory) -> Self {
+        Self {
+            action: action.to_string(),
+            primary: primary.to_string(),
+            secondary: secondary.map(|s| s.to_string()),
+            category,
+        }
+    }
+}
+
+/// All keybindings for the game
+pub struct KeybindingSettings {
+    pub bindings: Vec<Keybinding>,
+}
+
+impl Default for KeybindingSettings {
+    fn default() -> Self {
+        use KeybindingCategory::*;
+        Self {
+            bindings: vec![
+                // Movement
+                Keybinding::new("Move Up", "W / Up Arrow", Some("Numpad 8"), Movement),
+                Keybinding::new("Move Down", "S / Down Arrow", Some("Numpad 2"), Movement),
+                Keybinding::new("Move Left", "A / Left Arrow", Some("Numpad 4"), Movement),
+                Keybinding::new("Move Right", "D / Right Arrow", Some("Numpad 6"), Movement),
+                Keybinding::new("Move Up-Left", "Y", Some("Numpad 7"), Movement),
+                Keybinding::new("Move Up-Right", "U", Some("Numpad 9"), Movement),
+                Keybinding::new("Move Down-Left", "B", Some("Numpad 1"), Movement),
+                Keybinding::new("Move Down-Right", "N", Some("Numpad 3"), Movement),
+                Keybinding::new("Wait/Rest", "Z / 5", Some("Numpad 5"), Movement),
+                // Actions
+                Keybinding::new("Use Skill", "Space", None, Actions),
+                Keybinding::new("Cycle Skill", "Tab", None, Actions),
+                Keybinding::new("Descend Stairs", ". (Period)", None, Actions),
+                Keybinding::new("Ascend Stairs", ", (Comma)", None, Actions),
+                Keybinding::new("Pick Up Item", "G", None, Actions),
+                // Inventory
+                Keybinding::new("Use Item Slot 1", "1", None, Inventory),
+                Keybinding::new("Use Item Slot 2", "2", None, Inventory),
+                Keybinding::new("Use Item Slot 3", "3", None, Inventory),
+                Keybinding::new("Use Item Slot 4", "4", None, Inventory),
+                Keybinding::new("Use Item Slot 6-9, 0", "6-9, 0", None, Inventory),
+                // Interface
+                Keybinding::new("Open Settings", "Escape / O", None, Interface),
+                Keybinding::new("Toggle Auto-Play", "P", None, Interface),
+                Keybinding::new("Zoom In", "+ / =", None, Interface),
+                Keybinding::new("Zoom Out", "- / _", None, Interface),
+            ],
+        }
+    }
+}
+
+/// Audio settings (for future use)
+#[derive(Clone, PartialEq)]
+pub struct AudioSettings {
+    pub master_volume: f32,
+    pub music_volume: f32,
+    pub sfx_volume: f32,
+    pub ambient_volume: f32,
+    pub mute_when_unfocused: bool,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            master_volume: 0.8,
+            music_volume: 0.6,
+            sfx_volume: 0.8,
+            ambient_volume: 0.5,
+            mute_when_unfocused: true,
+        }
+    }
+}
+
+/// Combined settings structure
+#[derive(Clone)]
+pub struct Settings {
+    pub display: DisplaySettings,
+    pub gameplay: GameplaySettings,
+    pub keybindings: KeybindingSettings,
+    pub audio: AudioSettings,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            display: DisplaySettings::default(),
+            gameplay: GameplaySettings::default(),
+            keybindings: KeybindingSettings::default(),
+            audio: AudioSettings::default(),
+        }
+    }
+}
+
+/// The tab currently selected in the settings menu
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    Display,
+    Gameplay,
+    Keybindings,
+    Audio,
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/// Convert our color type to egui color
+fn to_egui_color(color: Color) -> egui::Color32 {
+    egui::Color32::from_rgb(color.r, color.g, color.b)
+}
+
+/// Convert our color with alpha to egui color
+fn to_egui_color_alpha(color: Color, alpha: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, alpha)
+}
+
+// ============================================================================
+// Application State
+// ============================================================================
+
+/// Application state
+enum AppState {
+    ClassSelect,
+    Playing,
+    GameOver,
+    Victory,
+}
+
+/// Main application
+struct ShadowCryptApp {
+    state: Option<GameState>,
+    app_state: AppState,
+    auto_play: bool,
+    auto_ai: AutoPlayAI,
+    last_update: std::time::Instant,
+    tile_size: f32,
+    lighting: LightingSystem,
+    show_lighting_debug: bool,
+    /// Whether to show the detailed character panel
+    show_character_panel: bool,
+    /// Skill cooldowns for display
+    skill_cooldowns: HashMap<Skill, u32>,
+    /// Currently hovered equipment slot
+    hover_slot: Option<EquipSlot>,
+    /// Currently hovered skill index
+    hover_skill: Option<usize>,
+    /// Application settings
+    settings: Settings,
+    /// Whether to show the settings menu
+    show_settings: bool,
+    /// Current settings tab
+    settings_tab: SettingsTab,
+}
+
+impl Default for ShadowCryptApp {
+    fn default() -> Self {
+        Self {
+            state: None,
+            app_state: AppState::ClassSelect,
+            auto_play: false,
+            auto_ai: AutoPlayAI::new(),
+            last_update: std::time::Instant::now(),
+            tile_size: 18.0,
+            lighting: LightingSystem::new(),
+            show_lighting_debug: false,
+            show_character_panel: true,
+            skill_cooldowns: HashMap::new(),
+            hover_slot: None,
+            hover_skill: None,
+            settings: Settings::default(),
+            show_settings: false,
+            settings_tab: SettingsTab::Display,
+        }
+    }
+}
+
+impl ShadowCryptApp {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self::default()
+    }
+
+    fn start_game(&mut self, class: CharacterClass) {
+        let state = GameState::new(class);
+        self.lighting.set_theme(state.map.theme, state.dungeon_level);
+        self.state = Some(state);
+        self.app_state = AppState::Playing;
+    }
+
+    fn render_class_select(&mut self, ctx: &egui::Context) {
+        // Dark background
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(10, 10, 15)))
+            .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(50.0);
+
+                // Title with glow effect
+                ui.heading(egui::RichText::new("SHADOWCRYPT")
+                    .size(56.0)
+                    .color(egui::Color32::from_rgb(80, 200, 220)));
+                ui.label(egui::RichText::new("A Roguelike of Darkness and Light")
+                    .size(16.0)
+                    .color(egui::Color32::from_rgb(100, 100, 120)));
+
+                ui.add_space(30.0);
+                ui.label(egui::RichText::new("Choose your class:")
+                    .size(20.0)
+                    .color(egui::Color32::from_rgb(180, 180, 200)));
+                ui.add_space(15.0);
+
+                for class in CharacterClass::all() {
+                    let (hp, atk, def, mana, _spd) = class.base_stats();
+                    let button_text = format!(
+                        "{:<12} HP:{:<3} ATK:{:<2} DEF:{:<2} MP:{:<3}",
+                        class.name(), hp, atk, def, mana
+                    );
+
+                    ui.horizontal(|ui| {
+                        ui.add_space(ui.available_width() / 2.0 - 200.0);
+                        if ui.add(egui::Button::new(
+                            egui::RichText::new(button_text)
+                                .monospace()
+                                .size(16.0)
+                                .color(egui::Color32::from_rgb(220, 220, 200))
+                        ).min_size(egui::vec2(400.0, 30.0))).clicked() {
+                            self.start_game(*class);
+                        }
+                    });
+                    ui.label(egui::RichText::new(format!("  {}", class.special_ability()))
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(100, 150, 150)));
+                    ui.add_space(8.0);
+                }
+
+                ui.add_space(30.0);
+                ui.checkbox(&mut self.auto_play,
+                    egui::RichText::new("Auto-play mode (watch AI play)")
+                        .color(egui::Color32::from_rgb(150, 150, 170)));
+
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("Controls: Arrow keys/WASD to move, Space for skill")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(80, 80, 100)));
+                ui.label(egui::RichText::new(". to descend stairs, , to ascend, 1-9 for items")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(80, 80, 100)));
+            });
+        });
+    }
+
+    fn render_game(&mut self, ctx: &egui::Context) {
+        let delta_time = self.last_update.elapsed().as_secs_f32();
+
+        // Update lighting animation
+        self.lighting.update(delta_time);
+
+        let state = match &self.state {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Handle auto-play
+        if self.auto_play && !state.game_over && !state.victory {
+            let elapsed = self.last_update.elapsed();
+            if elapsed.as_millis() > 100 {
+                self.last_update = std::time::Instant::now();
+
+                let state = self.state.as_ref().unwrap();
+                let action = self.auto_ai.decide(
+                    state.player.x,
+                    state.player.y,
+                    state.player.hp,
+                    state.player.total_max_hp(),
+                    state.player.mana,
+                    state.player.can_use_skill(),
+                    &state.map,
+                    &state.enemies,
+                    state.player.find_health_potion(),
+                    state.player.find_mana_potion(),
+                    state.dungeon_level,
+                    state.boss_defeated,
+                );
+
+                let state = self.state.as_mut().unwrap();
+                match action {
+                    AIAction::Move(dx, dy) => state.move_player(dx, dy),
+                    AIAction::UseSkill => state.use_skill(),
+                    AIAction::UseItem(idx) => state.use_item(idx),
+                    AIAction::Descend => state.descend(),
+                    AIAction::Ascend => state.ascend(),
+                    AIAction::Wait => state.end_turn(),
+                    AIAction::Attack(_, _) => {}
+                }
+
+                // Update lighting theme if level changed
+                self.lighting.set_theme(state.map.theme, state.dungeon_level);
+            }
+            ctx.request_repaint();
+        } else {
+            // Still request repaint for torch flicker animation
+            ctx.request_repaint();
+        }
+
+        self.last_update = std::time::Instant::now();
+
+        let state = self.state.as_ref().unwrap();
+
+        // Check game state
+        if state.game_over {
+            self.app_state = AppState::GameOver;
+        } else if state.victory {
+            self.app_state = AppState::Victory;
+        }
+
+        // Top panel for stats
+        egui::TopBottomPanel::top("stats")
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(15, 15, 20)))
+            .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let hp_ratio = state.player.hp as f32 / state.player.total_max_hp() as f32;
+                let hp_color = if hp_ratio > 0.6 {
+                    egui::Color32::from_rgb(50, 200, 50)
+                } else if hp_ratio > 0.3 {
+                    egui::Color32::from_rgb(200, 200, 50)
+                } else {
+                    egui::Color32::from_rgb(200, 50, 50)
+                };
+
+                ui.label(egui::RichText::new(format!("HP: {}/{}", state.player.hp, state.player.total_max_hp())).color(hp_color));
+                ui.separator();
+                ui.label(egui::RichText::new(format!("MP: {}/{}", state.player.mana, state.player.total_max_mana())).color(egui::Color32::from_rgb(100, 150, 255)));
+                ui.separator();
+                ui.label(egui::RichText::new(format!("Gold: {}", state.player.gold)).color(egui::Color32::from_rgb(255, 215, 0)));
+                ui.separator();
+                ui.label(egui::RichText::new(format!("Lv: {}", state.player.level)).color(egui::Color32::from_rgb(200, 200, 220)));
+                ui.separator();
+                ui.label(egui::RichText::new(format!("XP: {}/{}", state.player.xp, state.player.xp_to_level)).color(egui::Color32::from_rgb(150, 150, 180)));
+                ui.separator();
+
+                // Theme-colored floor indicator
+                let theme_color = match state.map.theme {
+                    DungeonTheme::Dungeon => egui::Color32::from_rgb(150, 150, 170),
+                    DungeonTheme::Cave => egui::Color32::from_rgb(140, 160, 140),
+                    DungeonTheme::Crypt => egui::Color32::from_rgb(180, 150, 200),
+                    DungeonTheme::Forest => egui::Color32::from_rgb(100, 180, 100),
+                    DungeonTheme::IceCavern => egui::Color32::from_rgb(150, 200, 230),
+                    DungeonTheme::VolcanicLair => egui::Color32::from_rgb(230, 140, 100),
+                    DungeonTheme::AncientRuins => egui::Color32::from_rgb(200, 180, 140),
+                    DungeonTheme::DemonRealm => egui::Color32::from_rgb(230, 100, 100),
+                };
+                ui.label(egui::RichText::new(format!("Floor {} - {}", state.dungeon_level, state.map.theme.name())).color(theme_color));
+
+                if let Some(skill) = state.player.current_skill() {
+                    ui.separator();
+                    ui.label(egui::RichText::new(format!("[Space] {} ({}mp)", skill.name(), skill.mana_cost())).color(egui::Color32::from_rgb(100, 200, 200)));
+                }
+
+                // Torch radius indicator
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let config = self.lighting.config();
+                    ui.label(egui::RichText::new(format!("Torch: {:.1}", config.torch_radius))
+                        .size(11.0)
+                        .color(to_egui_color(config.torch_color)));
+                });
+            });
+        });
+
+        // Bottom panel for messages
+        egui::TopBottomPanel::bottom("messages")
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(10, 10, 15)))
+            .min_height(100.0)
+            .show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.add_space(5.0);
+                for (msg, color) in &state.messages {
+                    ui.label(egui::RichText::new(msg).color(to_egui_color(*color)));
+                }
+            });
+        });
+
+        // Side panel for inventory
+        egui::SidePanel::right("inventory")
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(12, 12, 18)))
+            .min_width(220.0)
+            .show(ctx, |ui| {
+            ui.heading(egui::RichText::new("Inventory").color(egui::Color32::from_rgb(180, 180, 200)));
+            ui.separator();
+
+            if state.player.inventory.is_empty() {
+                ui.label(egui::RichText::new("(empty)").color(egui::Color32::from_rgb(80, 80, 100)));
+            } else {
+                for (i, item) in state.player.inventory.iter().enumerate().take(10) {
+                    let key = if i == 9 { '0' } else { char::from_digit((i + 1) as u32, 10).unwrap() };
+                    let color = to_egui_color(rarity_color(item.rarity));
+                    if ui.button(egui::RichText::new(format!("[{}] {}", key, item.display_name())).color(color)).clicked() {
+                        if let Some(state) = &mut self.state {
+                            state.use_item(i);
+                        }
+                    }
+                }
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.heading(egui::RichText::new("Equipment").color(egui::Color32::from_rgb(180, 180, 200)));
+
+            for slot in [EquipSlot::Weapon, EquipSlot::Armor, EquipSlot::Shield, EquipSlot::Helmet, EquipSlot::Boots, EquipSlot::Gloves] {
+                if let Some(item) = state.player.equipment.get(&slot) {
+                    let color = to_egui_color(rarity_color(item.rarity));
+                    ui.label(egui::RichText::new(format!("{}: {}", slot.name(), item.display_name())).color(color).size(12.0));
+                } else {
+                    ui.label(egui::RichText::new(format!("{}: -", slot.name())).color(egui::Color32::from_rgb(60, 60, 80)).size(12.0));
+                }
+            }
+
+            // Status effects
+            if !state.player.status_effects.is_empty() {
+                ui.add_space(10.0);
+                ui.separator();
+                ui.heading(egui::RichText::new("Status").color(egui::Color32::from_rgb(180, 180, 200)));
+                for (effect, duration) in &state.player.status_effects {
+                    let color = shadowcrypt_core::ui::status_effect_color(*effect);
+                    ui.label(egui::RichText::new(format!("{} ({})", effect.name(), duration)).color(to_egui_color(color)).size(12.0));
+                }
+            }
+        });
+
+        // Central panel for the game map with lighting
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(5, 5, 8)))
+            .show(ctx, |ui| {
+            let available_size = ui.available_size();
+            let view_width = (available_size.x / self.tile_size) as usize;
+            let view_height = (available_size.y / self.tile_size) as usize;
+
+            // Calculate viewport centered on player
+            let half_width = view_width / 2;
+            let half_height = view_height / 2;
+            let view_x = state.player.x.saturating_sub(half_width);
+            let view_y = state.player.y.saturating_sub(half_height);
+
+            let (response, painter) = ui.allocate_painter(available_size, egui::Sense::click());
+            let rect = response.rect;
+
+            // Collect additional light sources
+            let light_sources = self.lighting.collect_light_sources(
+                &state.map, &state.enemies, view_x, view_y, view_width, view_height
+            );
+
+            // Draw map with lighting
+            for y in 0..view_height.min(MAP_HEIGHT) {
+                let map_y = view_y + y;
+                if map_y >= MAP_HEIGHT {
+                    break;
+                }
+
+                for x in 0..view_width.min(MAP_WIDTH) {
+                    let map_x = view_x + x;
+                    if map_x >= MAP_WIDTH {
+                        break;
+                    }
+
+                    let screen_x = rect.min.x + x as f32 * self.tile_size;
+                    let screen_y = rect.min.y + y as f32 * self.tile_size;
+                    let tile_rect = egui::Rect::from_min_size(
+                        egui::pos2(screen_x, screen_y),
+                        egui::vec2(self.tile_size, self.tile_size),
+                    );
+
+                    // Determine what to draw
+                    let is_player_pos = map_x == state.player.x && map_y == state.player.y;
+                    let is_visible = state.map.visible[map_y][map_x];
+                    let is_explored = state.map.explored[map_y][map_x];
+
+                    if is_player_pos {
+                        // Player always fully lit
+                        painter.text(
+                            tile_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            '@',
+                            egui::FontId::monospace(self.tile_size * 0.85),
+                            egui::Color32::from_rgb(255, 255, 100),
+                        );
+                    } else if is_visible {
+                        // Calculate lighting for visible tiles
+                        let light_level = self.lighting.calculate_light_at(
+                            map_x, map_y, state.player.x, state.player.y,
+                            &state.map, &light_sources
+                        );
+                        let fog_amount = self.lighting.calculate_fog_at(
+                            map_x, map_y, state.player.x, state.player.y
+                        );
+
+                        // Determine glyph and base color
+                        let (glyph, base_color) = if let Some(enemy) = state.enemies.iter()
+                            .find(|e| e.is_alive() && e.x == map_x && e.y == map_y)
+                        {
+                            (enemy.kind.glyph(), enemy_color(enemy.kind))
+                        } else if let Some(item) = state.items.iter()
+                            .find(|i| i.x == map_x && i.y == map_y)
+                        {
+                            (item.kind.glyph(), rarity_color(item.rarity))
+                        } else {
+                            let tile = state.map.tiles[map_y][map_x];
+                            (tile.glyph(), tile_color(tile))
+                        };
+
+                        // Apply lighting to color
+                        let lit_color = self.lighting.apply_lighting(base_color, light_level, fog_amount);
+
+                        painter.text(
+                            tile_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            glyph,
+                            egui::FontId::monospace(self.tile_size * 0.85),
+                            to_egui_color(lit_color),
+                        );
+
+                        // Optional: draw fog overlay for very dark areas
+                        if fog_amount > 0.2 {
+                            let fog_alpha = ((fog_amount - 0.2) * 100.0) as u8;
+                            painter.rect_filled(
+                                tile_rect,
+                                0.0,
+                                to_egui_color_alpha(self.lighting.config().fog_color, fog_alpha),
+                            );
+                        }
+                    } else if is_explored {
+                        // Remembered tiles - darker
+                        let tile = state.map.tiles[map_y][map_x];
+                        let base_color = tile_color(tile);
+                        let memory_color = self.lighting.get_memory_color(base_color);
+
+                        painter.text(
+                            tile_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            tile.glyph(),
+                            egui::FontId::monospace(self.tile_size * 0.85),
+                            to_egui_color(memory_color),
+                        );
+                    }
+                    // Unexplored tiles are left as background (black)
+                }
+            }
+
+            // Draw atmospheric vignette effect around edges
+            let vignette_strength = match state.map.theme {
+                DungeonTheme::DemonRealm => 0.4,
+                DungeonTheme::Crypt => 0.35,
+                DungeonTheme::VolcanicLair => 0.3,
+                _ => 0.2,
+            };
+
+            // Top vignette
+            for i in 0..5 {
+                let alpha = (vignette_strength * 255.0 * (1.0 - i as f32 / 5.0)) as u8;
+                let vignette_rect = egui::Rect::from_min_size(
+                    rect.min + egui::vec2(0.0, i as f32 * self.tile_size),
+                    egui::vec2(rect.width(), self.tile_size),
+                );
+                painter.rect_filled(
+                    vignette_rect,
+                    0.0,
+                    to_egui_color_alpha(self.lighting.config().fog_color, alpha),
+                );
+            }
+
+            // Bottom vignette
+            for i in 0..5 {
+                let alpha = (vignette_strength * 255.0 * (1.0 - i as f32 / 5.0)) as u8;
+                let vignette_rect = egui::Rect::from_min_size(
+                    rect.min + egui::vec2(0.0, rect.height() - (i + 1) as f32 * self.tile_size),
+                    egui::vec2(rect.width(), self.tile_size),
+                );
+                painter.rect_filled(
+                    vignette_rect,
+                    0.0,
+                    to_egui_color_alpha(self.lighting.config().fog_color, alpha),
+                );
+            }
+        });
+
+        // Handle keyboard input
+        ctx.input(|i| {
+            if let Some(state) = &mut self.state {
+                // Movement
+                if i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::W) {
+                    state.move_player(0, -1);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::S) {
+                    state.move_player(0, 1);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::A) {
+                    state.move_player(-1, 0);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::D) {
+                    state.move_player(1, 0);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+
+                // Diagonal movement (numpad style)
+                if i.key_pressed(egui::Key::Y) {
+                    state.move_player(-1, -1);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::U) {
+                    state.move_player(1, -1);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::B) {
+                    state.move_player(-1, 1);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::N) {
+                    state.move_player(1, 1);
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+
+                // Skills
+                if i.key_pressed(egui::Key::Space) {
+                    state.use_skill();
+                }
+                if i.key_pressed(egui::Key::Tab) {
+                    state.cycle_skill();
+                }
+
+                // Stairs
+                if i.key_pressed(egui::Key::Period) {
+                    state.descend();
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+                if i.key_pressed(egui::Key::Comma) {
+                    state.ascend();
+                    self.lighting.set_theme(state.map.theme, state.dungeon_level);
+                }
+
+                // Wait
+                if i.key_pressed(egui::Key::Num5) || i.key_pressed(egui::Key::Z) {
+                    state.end_turn();
+                }
+
+                // Quick use items (1-9, 0)
+                for (idx, key) in [
+                    egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5,
+                    egui::Key::Num6, egui::Key::Num7, egui::Key::Num8, egui::Key::Num9, egui::Key::Num0,
+                ].iter().enumerate() {
+                    if i.key_pressed(*key) && idx != 4 { // 5 is wait
+                        let item_idx = if idx == 9 { 9 } else { idx };
+                        state.use_item(item_idx);
+                    }
+                }
+            }
+        });
+    }
+
+    fn render_game_over(&mut self, ctx: &egui::Context) {
+        let state = self.state.as_ref().unwrap();
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(15, 5, 5)))
+            .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(100.0);
+                ui.heading(egui::RichText::new("GAME OVER")
+                    .size(56.0)
+                    .color(egui::Color32::from_rgb(200, 50, 50)));
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("The darkness has consumed you...")
+                    .size(16.0)
+                    .color(egui::Color32::from_rgb(150, 100, 100)));
+                ui.add_space(30.0);
+                ui.label(egui::RichText::new(format!("Class: {}", state.player.class.name()))
+                    .color(egui::Color32::from_rgb(180, 180, 200)));
+                ui.label(egui::RichText::new(format!("Perished on floor {} after {} turns", state.dungeon_level, state.turn_count))
+                    .color(egui::Color32::from_rgb(150, 150, 170)));
+                ui.label(egui::RichText::new(format!("Level: {} | Gold: {} | Kills: {}", state.player.level, state.player.gold, state.player.kills))
+                    .color(egui::Color32::from_rgb(150, 150, 170)));
+                ui.add_space(30.0);
+                if ui.button(egui::RichText::new("Return to Light")
+                    .size(18.0)
+                    .color(egui::Color32::from_rgb(200, 200, 220))).clicked() {
+                    self.state = None;
+                    self.app_state = AppState::ClassSelect;
+                }
+            });
+        });
+    }
+
+    fn render_victory(&mut self, ctx: &egui::Context) {
+        let state = self.state.as_ref().unwrap();
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::default().fill(egui::Color32::from_rgb(15, 15, 25)))
+            .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(80.0);
+                ui.heading(egui::RichText::new("VICTORY!")
+                    .size(64.0)
+                    .color(egui::Color32::from_rgb(255, 215, 0)));
+                ui.add_space(10.0);
+                ui.heading(egui::RichText::new("The Demon King has fallen!")
+                    .size(24.0)
+                    .color(egui::Color32::from_rgb(100, 200, 200)));
+                ui.label(egui::RichText::new("Light returns to the realm of ShadowCrypt")
+                    .size(16.0)
+                    .color(egui::Color32::from_rgb(150, 180, 180)));
+                ui.add_space(40.0);
+
+                ui.group(|ui| {
+                    ui.set_min_width(300.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new("Final Statistics")
+                            .size(18.0)
+                            .color(egui::Color32::from_rgb(200, 200, 220)));
+                        ui.separator();
+                        ui.label(egui::RichText::new(format!("Class: {}", state.player.class.name()))
+                            .color(egui::Color32::from_rgb(180, 180, 200)));
+                        ui.label(egui::RichText::new(format!("Final Level: {}", state.player.level))
+                            .color(egui::Color32::from_rgb(100, 200, 100)));
+                        ui.label(egui::RichText::new(format!("Gold Collected: {}", state.player.gold))
+                            .color(egui::Color32::from_rgb(255, 215, 0)));
+                        ui.label(egui::RichText::new(format!("Enemies Vanquished: {}", state.player.kills))
+                            .color(egui::Color32::from_rgb(200, 100, 100)));
+                        ui.label(egui::RichText::new(format!("Turns Taken: {}", state.turn_count))
+                            .color(egui::Color32::from_rgb(150, 150, 180)));
+                    });
+                });
+
+                ui.add_space(30.0);
+                if ui.button(egui::RichText::new("Begin New Journey")
+                    .size(18.0)
+                    .color(egui::Color32::from_rgb(200, 200, 220))).clicked() {
+                    self.state = None;
+                    self.app_state = AppState::ClassSelect;
+                }
+            });
+        });
+    }
+}
+
+impl eframe::App for ShadowCryptApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Set dark visuals
+        ctx.set_visuals(egui::Visuals::dark());
+
+        match self.app_state {
+            AppState::ClassSelect => self.render_class_select(ctx),
+            AppState::Playing => self.render_game(ctx),
+            AppState::GameOver => self.render_game_over(ctx),
+            AppState::Victory => self.render_victory(ctx),
+        }
+    }
+}
+
+fn main() -> eframe::Result<()> {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([800.0, 600.0])
+            .with_title("ShadowCrypt - Roguelike of Darkness and Light"),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "ShadowCrypt",
+        options,
+        Box::new(|cc| Ok(Box::new(ShadowCryptApp::new(cc)))),
+    )
 }

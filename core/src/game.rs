@@ -12,6 +12,7 @@ use crate::items::{Item, ItemKind, Rarity};
 use crate::magic::Skill;
 use crate::world::{Map, Room, Tile, BOSS_LEVELS, MAX_DUNGEON_LEVEL, MAP_WIDTH, MAP_HEIGHT};
 use crate::ai::{AIAction, AIDecider};
+use crate::quests::{QuestTracker, QuestReward, QuestId};
 
 /// A message with an associated color index
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -41,6 +42,8 @@ pub struct GameState {
     pub boss_defeated: bool,
     pub show_inventory: bool,
     pub show_help: bool,
+    pub show_quests: bool,
+    pub quest_tracker: QuestTracker,
     #[serde(skip, default = "StdRng::from_entropy")]
     pub rng: StdRng,
 }
@@ -55,6 +58,9 @@ impl GameState {
         let (px, py) = map.rooms[0].center();
         let player = Player::new(px, py, class);
 
+        let mut quest_tracker = QuestTracker::new();
+        quest_tracker.auto_start_starter_quests(1, 1);
+
         let mut state = Self {
             map,
             player,
@@ -68,11 +74,14 @@ impl GameState {
             boss_defeated: false,
             show_inventory: false,
             show_help: false,
+            show_quests: false,
+            quest_tracker,
             rng,
         };
 
         state.add_message(format!("Welcome, {}! Descend to level 30 to defeat the Demon King!", class.name()), 9);
         state.add_message(format!("Press ? for help. Your skill: {}", class.special_ability()), 11);
+        state.add_message("Press Q to view your quests.".to_string(), 5);
         state.spawn_enemies();
         state.spawn_items();
         state.map.compute_fov(state.player.x, state.player.y);
@@ -499,6 +508,12 @@ impl GameState {
         let enemy_name = self.enemies[idx].kind.name();
         self.add_message(format!("You hit {} for {} damage!", enemy_name, damage), 2);
 
+        // Track damage for quests
+        let quest_msgs = self.quest_tracker.on_damage_dealt(damage as u32);
+        for msg in quest_msgs {
+            self.add_message(msg, 5);
+        }
+
         // Check for vampire ring life steal
         if self.player.equipment.values().any(|i| i.kind == ItemKind::RingOfTheVampire) {
             let heal = damage / 4;
@@ -511,12 +526,25 @@ impl GameState {
         if !self.enemies[idx].is_alive() {
             let xp = self.enemies[idx].xp_value;
             let is_boss = self.enemies[idx].kind.is_boss();
+            let enemy_kind = self.enemies[idx].kind;
 
             self.add_message(format!("{} is dead! +{} XP", enemy_name, xp), 5);
             self.player.kills += 1;
 
+            // Track kill for quests
+            let quest_msgs = self.quest_tracker.on_enemy_killed(enemy_kind);
+            for msg in quest_msgs {
+                self.add_message(msg, 5);
+            }
+
+            let old_level = self.player.level;
             if self.player.gain_xp(xp) {
                 self.add_message(format!("LEVEL UP! You are now level {}!", self.player.level), 11);
+                // Track player level for quests
+                let quest_msgs = self.quest_tracker.on_player_level_changed(self.player.level);
+                for msg in quest_msgs {
+                    self.add_message(msg, 5);
+                }
             }
 
             if is_boss {
@@ -541,6 +569,9 @@ impl GameState {
                     self.add_message("YOU HAVE DEFEATED THE DEMON KING! VICTORY!".to_string(), 11);
                 }
             }
+
+            // Check for completable quests
+            self.check_completable_quests();
         }
 
         self.end_turn();
@@ -609,6 +640,19 @@ impl GameState {
         let gold_amount = self.rng.gen_range(10..=50) * self.dungeon_level;
         self.player.gold += gold_amount;
 
+        // Track chest opening for quests
+        let quest_msgs = self.quest_tracker.on_chest_opened();
+        for msg in quest_msgs {
+            self.add_message(msg, 5);
+        }
+
+        // Track gold for quests
+        let quest_msgs = self.quest_tracker.on_gold_changed(self.player.gold);
+        for msg in quest_msgs {
+            self.add_message(msg, 5);
+        }
+
+        self.check_completable_quests();
         self.add_message(format!("You open the chest! Found {} gold and {} items!", gold_amount, num_items), 11);
         self.end_turn();
     }
@@ -616,6 +660,12 @@ impl GameState {
     /// Use a shrine
     fn use_shrine(&mut self, x: usize, y: usize) {
         self.map.tiles[y][x] = Tile::UsedShrine;
+
+        // Track shrine usage for quests
+        let quest_msgs = self.quest_tracker.on_shrine_used();
+        for msg in quest_msgs {
+            self.add_message(msg, 5);
+        }
 
         let effect = self.rng.gen_range(0..6);
         match effect {
@@ -644,13 +694,20 @@ impl GameState {
             }
             _ => {
                 let xp = 50 * self.dungeon_level;
+                let old_level = self.player.level;
                 if self.player.gain_xp(xp) {
                     self.add_message(format!("Shrine of Experience! +{} XP! LEVEL UP!", xp), 11);
+                    // Track player level for quests
+                    let quest_msgs = self.quest_tracker.on_player_level_changed(self.player.level);
+                    for msg in quest_msgs {
+                        self.add_message(msg, 5);
+                    }
                 } else {
                     self.add_message(format!("Shrine of Experience! +{} XP!", xp), 5);
                 }
             }
         }
+        self.check_completable_quests();
         self.end_turn();
     }
 
@@ -667,12 +724,16 @@ impl GameState {
             }
         }
 
+        let mut gold_collected = false;
+        let mut items_collected: Vec<(ItemKind, Rarity)> = Vec::new();
+
         for (_, kind, rarity) in picked_up.iter().rev() {
             match kind {
                 ItemKind::Gold => {
                     let amount = self.rng.gen_range(5..=25) * (1 + self.dungeon_level / 3);
                     self.player.gold += amount;
                     self.add_message(format!("Picked up {} gold!", amount), 11);
+                    gold_collected = true;
                 }
                 ItemKind::Key => {
                     self.player.keys += 1;
@@ -684,11 +745,28 @@ impl GameState {
                         if self.player.inventory.len() < 20 {
                             self.player.inventory.push(Item::new(0, 0, *kind, *rarity));
                             self.add_message(format!("Picked up {}!", display_name), rarity.color_index());
+                            items_collected.push((*kind, *rarity));
                         } else {
                             self.add_message("Inventory full!".to_string(), 3);
                         }
                     }
                 }
+            }
+        }
+
+        // Track gold for quests
+        if gold_collected {
+            let quest_msgs = self.quest_tracker.on_gold_changed(self.player.gold);
+            for msg in quest_msgs {
+                self.add_message(msg, 5);
+            }
+        }
+
+        // Track item collection for quests
+        for (kind, rarity) in items_collected {
+            let quest_msgs = self.quest_tracker.on_item_collected(kind, rarity);
+            for msg in quest_msgs {
+                self.add_message(msg, 5);
             }
         }
 
@@ -700,6 +778,8 @@ impl GameState {
         for idx in to_remove.into_iter().rev() {
             self.items.remove(idx);
         }
+
+        self.check_completable_quests();
     }
 
     /// End the current turn
@@ -724,6 +804,14 @@ impl GameState {
         if self.player.equipment.values().any(|i| i.kind == ItemKind::RingOfRegeneration) {
             if self.turn_count % 5 == 0 {
                 self.player.heal(1);
+            }
+        }
+
+        // Track turns for quests (every 10 turns to reduce message spam)
+        if self.turn_count % 10 == 0 {
+            let quest_msgs = self.quest_tracker.on_turn(self.turn_count);
+            for msg in quest_msgs {
+                self.add_message(msg, 5);
             }
         }
 
@@ -858,6 +946,12 @@ impl GameState {
 
         let skill = self.player.skills[self.player.active_skill];
         self.player.mana -= skill.mana_cost();
+
+        // Track skill usage for quests
+        let quest_msgs = self.quest_tracker.on_skill_used();
+        for msg in quest_msgs {
+            self.add_message(msg, 5);
+        }
 
         match skill {
             Skill::Berserk => {

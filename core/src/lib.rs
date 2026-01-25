@@ -12,8 +12,10 @@
 //! - `entities` - Player and enemy entities
 //! - `world` - Map, tiles, and dungeon generation
 //! - `ai` - AI decision making for auto-play
+//! - `companions` - Companion/pet system with AI, leveling, and abilities
 //! - `game` - Main game state and logic
 //! - `save` - Save/load functionality
+//! - `time` - Day/night cycle system with time-based events
 //!
 //! # Example Usage
 //!
@@ -42,8 +44,11 @@ pub mod items;
 pub mod entities;
 pub mod world;
 pub mod ai;
+pub mod companions;
 pub mod game;
 pub mod save;
+pub mod quests;
+pub mod time;
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -55,8 +60,19 @@ pub mod prelude {
     pub use crate::world::{Map, Tile, DungeonTheme, Room};
     pub use crate::world::{MAP_WIDTH, MAP_HEIGHT, VIEW_RADIUS, MAX_DUNGEON_LEVEL, BOSS_LEVELS};
     pub use crate::ai::{AIAction, AIDecider};
+    pub use crate::companions::{
+        Companion, CompanionKind, CompanionRarity, CompanionAbility,
+        CompanionBehavior, CompanionMorale, CompanionAction, CompanionAI,
+        CompanionEncounter, MAX_COMPANIONS,
+    };
     pub use crate::game::{GameState, GameMessage};
     pub use crate::save::{save_game, load_game, save_exists, delete_save};
+    pub use crate::quests::{Quest, QuestTracker, QuestReward, QuestCategory, QuestState, ObjectiveType};
+    pub use crate::time::{
+        TimeSystem, TimePhase, TimeEvent, TimeModifiers, TimeEffect,
+        CreatureActivity, MINUTES_PER_TURN, MINUTES_PER_DAY,
+        BASE_VIEW_RADIUS, MIN_VIEW_RADIUS,
+    };
 }
 
 // Re-export commonly used types at crate root
@@ -68,3 +84,9 @@ pub use items::{Item, ItemKind, Rarity, EquipSlot};
 pub use entities::{Player, Enemy, EnemyKind};
 pub use world::{Map, Tile, DungeonTheme, Room};
 pub use ai::{AIAction, AIDecider};
+pub use companions::{
+    Companion, CompanionKind, CompanionRarity, CompanionAbility,
+    CompanionBehavior, CompanionMorale, CompanionAction, CompanionAI,
+    CompanionEncounter, MAX_COMPANIONS,
+};
+pub use quests::{Quest, QuestTracker, QuestReward, QuestCategory, QuestState, ObjectiveType};

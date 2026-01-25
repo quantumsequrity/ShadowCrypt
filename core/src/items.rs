@@ -27,6 +27,85 @@ pub enum Rarity {
     Mythic,
 }
 
+/// Food quality levels - affects hunger restoration and bonuses
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug)]
+pub enum FoodQuality {
+    Rotten,      // Spoiled food - might cause sickness
+    Raw,         // Uncooked - less effective
+    Stale,       // Old food - reduced effectiveness
+    Fresh,       // Normal quality
+    Cooked,      // Cooked food - bonus effectiveness
+    WellCooked,  // Skillfully prepared
+    Gourmet,     // Master chef quality
+    Legendary,   // Magical/divine food
+}
+
+impl FoodQuality {
+    /// Get display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            FoodQuality::Rotten => "Rotten",
+            FoodQuality::Raw => "Raw",
+            FoodQuality::Stale => "Stale",
+            FoodQuality::Fresh => "Fresh",
+            FoodQuality::Cooked => "Cooked",
+            FoodQuality::WellCooked => "Well-Cooked",
+            FoodQuality::Gourmet => "Gourmet",
+            FoodQuality::Legendary => "Legendary",
+        }
+    }
+
+    /// Get color index for display
+    pub fn color_index(&self) -> u8 {
+        match self {
+            FoodQuality::Rotten => 4,       // Dark/brown
+            FoodQuality::Raw => 3,          // Red
+            FoodQuality::Stale => 6,        // Orange
+            FoodQuality::Fresh => 1,        // White
+            FoodQuality::Cooked => 5,       // Green
+            FoodQuality::WellCooked => 13,  // Bright green
+            FoodQuality::Gourmet => 11,     // Yellow/gold
+            FoodQuality::Legendary => 7,    // Cyan/magic
+        }
+    }
+
+    /// Get the hunger value multiplier for this quality
+    pub fn hunger_multiplier(&self) -> f32 {
+        match self {
+            FoodQuality::Rotten => 0.3,
+            FoodQuality::Raw => 0.6,
+            FoodQuality::Stale => 0.8,
+            FoodQuality::Fresh => 1.0,
+            FoodQuality::Cooked => 1.3,
+            FoodQuality::WellCooked => 1.5,
+            FoodQuality::Gourmet => 2.0,
+            FoodQuality::Legendary => 3.0,
+        }
+    }
+
+    /// Check if food can be cooked
+    pub fn can_cook(&self) -> bool {
+        matches!(self, FoodQuality::Raw | FoodQuality::Fresh)
+    }
+
+    /// Check if food can spoil/decay
+    pub fn can_spoil(&self) -> bool {
+        matches!(self, FoodQuality::Fresh | FoodQuality::Cooked | FoodQuality::WellCooked)
+    }
+
+    /// Get next quality level when food spoils
+    pub fn spoiled(&self) -> FoodQuality {
+        match self {
+            FoodQuality::Fresh => FoodQuality::Stale,
+            FoodQuality::Cooked => FoodQuality::Stale,
+            FoodQuality::WellCooked => FoodQuality::Cooked,
+            FoodQuality::Gourmet => FoodQuality::WellCooked,
+            FoodQuality::Stale => FoodQuality::Rotten,
+            _ => *self,
+        }
+    }
+}
+
 impl Rarity {
     /// Returns a color index for the rarity (for UI rendering)
     pub fn color_index(&self) -> u8 {
