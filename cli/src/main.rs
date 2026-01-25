@@ -646,6 +646,211 @@ impl TargetingState {
     }
 }
 
+// ============================================================================
+// ENHANCED MESSAGE LOG SYSTEM
+// ============================================================================
+
+/// Categories for game messages to enable filtering
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MessageCategory {
+    Combat,   // Attack, damage, kills
+    Loot,     // Item pickups, gold, equipment
+    System,   // Game events, level changes, status
+    All,      // Special filter to show all messages
+}
+
+impl MessageCategory {
+    pub fn name(&self) -> &'static str {
+        match self {
+            MessageCategory::Combat => "Combat",
+            MessageCategory::Loot => "Loot",
+            MessageCategory::System => "System",
+            MessageCategory::All => "All",
+        }
+    }
+
+    pub fn label_color(&self) -> Color {
+        match self {
+            MessageCategory::Combat => Color::Red,
+            MessageCategory::Loot => Color::Yellow,
+            MessageCategory::System => Color::Cyan,
+            MessageCategory::All => Color::White,
+        }
+    }
+
+    pub fn tag(&self) -> &'static str {
+        match self {
+            MessageCategory::Combat => "[CMB]",
+            MessageCategory::Loot => "[LT]",
+            MessageCategory::System => "[SYS]",
+            MessageCategory::All => "",
+        }
+    }
+}
+
+/// An enhanced message with category and timestamp
+#[derive(Clone)]
+pub struct EnhancedMessage {
+    pub text: String,
+    pub color_index: u8,
+    pub category: MessageCategory,
+    pub turn_number: u32,
+    pub elapsed_secs: f32,
+}
+
+impl EnhancedMessage {
+    pub fn new(text: String, color_index: u8, category: MessageCategory, turn: u32, elapsed: f32) -> Self {
+        Self { text, color_index, category, turn_number: turn, elapsed_secs: elapsed }
+    }
+
+    pub fn formatted_time(&self) -> String {
+        let total_secs = self.elapsed_secs as u32;
+        format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
+    }
+}
+
+/// Enhanced message log with scrolling, history, and filtering
+pub struct MessageLog {
+    messages: Vec<EnhancedMessage>,
+    max_history: usize,
+    scroll_offset: usize,
+    visible_count: usize,
+    active_filter: MessageCategory,
+    show_timestamps: bool,
+    show_categories: bool,
+    game_start: Instant,
+    last_processed_count: usize,
+    expanded_view: bool,
+}
+
+impl MessageLog {
+    pub fn new() -> Self {
+        Self {
+            messages: Vec::new(),
+            max_history: 500,
+            scroll_offset: 0,
+            visible_count: 6,
+            active_filter: MessageCategory::All,
+            show_timestamps: true,
+            show_categories: true,
+            game_start: Instant::now(),
+            last_processed_count: 0,
+            expanded_view: false,
+        }
+    }
+
+    fn categorize_message(text: &str, color_index: u8) -> MessageCategory {
+        let t = text.to_lowercase();
+        if t.contains("hit") || t.contains("damage") || t.contains("attack") || t.contains("dead")
+            || t.contains("kill") || t.contains("miss") || t.contains("strike") || t.contains("slain")
+            || t.contains("poison") || t.contains("burn") || t.contains("freeze") || t.contains("stun")
+            || t.contains("enemy") || color_index == 2 || color_index == 3 {
+            return MessageCategory::Combat;
+        }
+        if t.contains("picked up") || t.contains("gold") || t.contains("found") || t.contains("equipped")
+            || t.contains("chest") || t.contains("item") || t.contains("key") || t.contains("potion")
+            || t.contains("xp") || t.contains("level up") {
+            return MessageCategory::Loot;
+        }
+        MessageCategory::System
+    }
+
+    pub fn sync_from_game(&mut self, game_messages: &[GameMessage], turn_count: u32) {
+        let elapsed = self.game_start.elapsed().as_secs_f32();
+        for msg in game_messages.iter().skip(self.last_processed_count) {
+            let category = Self::categorize_message(&msg.text, msg.color_index);
+            self.messages.push(EnhancedMessage::new(msg.text.clone(), msg.color_index, category, turn_count, elapsed));
+        }
+        self.last_processed_count = game_messages.len();
+        while self.messages.len() > self.max_history { self.messages.remove(0); }
+        if self.scroll_offset == 0 { self.scroll_to_bottom(); }
+    }
+
+    pub fn filtered_messages(&self) -> Vec<&EnhancedMessage> {
+        if self.active_filter == MessageCategory::All {
+            self.messages.iter().collect()
+        } else {
+            self.messages.iter().filter(|m| m.category == self.active_filter).collect()
+        }
+    }
+
+    pub fn visible_messages(&self) -> Vec<&EnhancedMessage> {
+        let filtered = self.filtered_messages();
+        let total = filtered.len();
+        let display_count = if self.expanded_view { 20 } else { self.visible_count };
+        if total == 0 { return Vec::new(); }
+        let start = total.saturating_sub(display_count + self.scroll_offset);
+        let end = total.saturating_sub(self.scroll_offset);
+        filtered[start..end].to_vec()
+    }
+
+    pub fn scroll_up(&mut self) {
+        let fc = self.filtered_messages().len();
+        let dc = if self.expanded_view { 20 } else { self.visible_count };
+        if self.scroll_offset + dc < fc { self.scroll_offset += 1; }
+    }
+
+    pub fn scroll_down(&mut self) {
+        if self.scroll_offset > 0 { self.scroll_offset -= 1; }
+    }
+
+    pub fn scroll_to_bottom(&mut self) { self.scroll_offset = 0; }
+
+    pub fn scroll_to_top(&mut self) {
+        let fc = self.filtered_messages().len();
+        let dc = if self.expanded_view { 20 } else { self.visible_count };
+        if fc > dc { self.scroll_offset = fc - dc; }
+    }
+
+    pub fn page_up(&mut self) {
+        let fc = self.filtered_messages().len();
+        let dc = if self.expanded_view { 20 } else { self.visible_count };
+        let max_off = fc.saturating_sub(dc);
+        self.scroll_offset = (self.scroll_offset + dc).min(max_off);
+    }
+
+    pub fn page_down(&mut self) {
+        let dc = if self.expanded_view { 20 } else { self.visible_count };
+        self.scroll_offset = self.scroll_offset.saturating_sub(dc);
+    }
+
+    pub fn cycle_filter(&mut self) {
+        self.active_filter = match self.active_filter {
+            MessageCategory::All => MessageCategory::Combat,
+            MessageCategory::Combat => MessageCategory::Loot,
+            MessageCategory::Loot => MessageCategory::System,
+            MessageCategory::System => MessageCategory::All,
+        };
+        self.scroll_offset = 0;
+    }
+
+    pub fn toggle_timestamps(&mut self) { self.show_timestamps = !self.show_timestamps; }
+    pub fn toggle_categories(&mut self) { self.show_categories = !self.show_categories; }
+    pub fn toggle_expanded(&mut self) { self.expanded_view = !self.expanded_view; self.scroll_offset = 0; }
+
+    pub fn can_scroll_up(&self) -> bool {
+        let fc = self.filtered_messages().len();
+        let dc = if self.expanded_view { 20 } else { self.visible_count };
+        self.scroll_offset + dc < fc
+    }
+
+    pub fn can_scroll_down(&self) -> bool { self.scroll_offset > 0 }
+
+    pub fn scroll_info(&self) -> String {
+        let f = self.filtered_messages().len();
+        let dc = if self.expanded_view { 20 } else { self.visible_count };
+        if f <= dc { format!("{}/{}", f, self.messages.len()) }
+        else {
+            let top = f.saturating_sub(self.scroll_offset + dc) + 1;
+            let bot = f.saturating_sub(self.scroll_offset);
+            format!("{}-{}/{}", top, bot, f)
+        }
+    }
+
+    pub fn is_expanded(&self) -> bool { self.expanded_view }
+    pub fn get_filter(&self) -> MessageCategory { self.active_filter }
+}
+
 /// Parse key input to get direction
 fn key_to_direction(code: KeyCode) -> Option<Direction> {
     match code {
@@ -1204,6 +1409,156 @@ fn color_from_index(index: u8) -> Color {
 }
 
 // ============================================================================
+// ============================================================================
+// MINIMAP CONSTANTS AND RENDERING
+// ============================================================================
+
+/// Minimap dimensions
+const MINIMAP_WIDTH: usize = 20;
+const MINIMAP_HEIGHT: usize = 11;
+/// Minimap position (top-right corner)
+const MINIMAP_X: u16 = 78;
+const MINIMAP_Y: u16 = 1;
+
+/// Render a minimap in the top-right corner showing explored areas,
+/// player position, stairs, and enemies
+fn render_minimap(state: &GameState) -> std::io::Result<()> {
+    let mut stdout = stdout();
+
+    // Calculate scale factors
+    let scale_x = MAP_WIDTH as f32 / (MINIMAP_WIDTH - 2) as f32;
+    let scale_y = MAP_HEIGHT as f32 / (MINIMAP_HEIGHT - 2) as f32;
+
+    // Draw minimap title
+    execute!(stdout, MoveTo(MINIMAP_X, MINIMAP_Y - 1))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "[MAP]")?;
+
+    // Top border
+    execute!(stdout, MoveTo(MINIMAP_X, MINIMAP_Y))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "+")?;
+    for _ in 0..(MINIMAP_WIDTH - 2) {
+        write!(stdout, "-")?;
+    }
+    write!(stdout, "+")?;
+
+    // Build minimap data - we'll sample the map at scaled positions
+    // For each minimap cell, we check a region of the game map
+    for my in 0..(MINIMAP_HEIGHT - 2) {
+        execute!(stdout, MoveTo(MINIMAP_X, MINIMAP_Y + 1 + my as u16))?;
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "|")?;
+
+        for mx in 0..(MINIMAP_WIDTH - 2) {
+            // Calculate the region of the game map this minimap cell represents
+            let map_x_start = (mx as f32 * scale_x) as usize;
+            let map_y_start = (my as f32 * scale_y) as usize;
+            let map_x_end = ((mx + 1) as f32 * scale_x) as usize;
+            let map_y_end = ((my + 1) as f32 * scale_y) as usize;
+
+            // Check if player is in this region
+            let player_here = state.player.x >= map_x_start
+                && state.player.x < map_x_end
+                && state.player.y >= map_y_start
+                && state.player.y < map_y_end;
+
+            if player_here {
+                execute!(stdout, SetForegroundColor(Color::Yellow))?;
+                write!(stdout, "@")?;
+                continue;
+            }
+
+            // Check for enemies in this region (only visible ones)
+            let enemy_here = state.enemies.iter().any(|e| {
+                e.is_alive()
+                    && e.x >= map_x_start
+                    && e.x < map_x_end
+                    && e.y >= map_y_start
+                    && e.y < map_y_end
+                    && state.map.visible[e.y][e.x]
+            });
+
+            if enemy_here {
+                execute!(stdout, SetForegroundColor(Color::Red))?;
+                write!(stdout, "!")?;
+                continue;
+            }
+
+            // Check for stairs in this region (explored areas only)
+            let mut stairs_char: Option<char> = None;
+            for y in map_y_start..map_y_end.min(MAP_HEIGHT) {
+                for x in map_x_start..map_x_end.min(MAP_WIDTH) {
+                    if state.map.explored[y][x] {
+                        match state.map.tiles[y][x] {
+                            Tile::StairsDown => { stairs_char = Some('>'); break; }
+                            Tile::StairsUp => { stairs_char = Some('<'); break; }
+                            _ => {}
+                        }
+                    }
+                }
+                if stairs_char.is_some() { break; }
+            }
+
+            if let Some(c) = stairs_char {
+                execute!(stdout, SetForegroundColor(Color::Cyan))?;
+                write!(stdout, "{}", c)?;
+                continue;
+            }
+
+            // Check if any part of this region is explored
+            let mut has_explored = false;
+            let mut has_visible = false;
+            let mut has_floor = false;
+
+            for y in map_y_start..map_y_end.min(MAP_HEIGHT) {
+                for x in map_x_start..map_x_end.min(MAP_WIDTH) {
+                    if state.map.visible[y][x] {
+                        has_visible = true;
+                        has_explored = true;
+                        if state.map.tiles[y][x].walkable() {
+                            has_floor = true;
+                        }
+                    } else if state.map.explored[y][x] {
+                        has_explored = true;
+                        if state.map.tiles[y][x].walkable() {
+                            has_floor = true;
+                        }
+                    }
+                }
+            }
+
+            if has_visible && has_floor {
+                execute!(stdout, SetForegroundColor(Color::White))?;
+                write!(stdout, ".")?;
+            } else if has_explored && has_floor {
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, ".")?;
+            } else if has_explored {
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "#")?;
+            } else {
+                write!(stdout, " ")?;
+            }
+        }
+
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "|")?;
+    }
+
+    // Bottom border
+    execute!(stdout, MoveTo(MINIMAP_X, MINIMAP_Y + MINIMAP_HEIGHT as u16 - 1))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "+")?;
+    for _ in 0..(MINIMAP_WIDTH - 2) {
+        write!(stdout, "-")?;
+    }
+    write!(stdout, "+")?;
+
+    execute!(stdout, ResetColor)?;
+    Ok(())
+}
+
 // RENDERING FUNCTIONS
 // ============================================================================
 

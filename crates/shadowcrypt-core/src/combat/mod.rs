@@ -2789,6 +2789,82 @@ impl Enemy {
         }
         self.riposte_active = false;
         self.combat_stats.turn_passed();
+
+        // Tick elite affix cooldowns
+        self.elite_data.tick();
+
+        // Apply regeneration from Regenerating affix
+        let regen = self.elite_data.calculate_regen(self.max_hp);
+        if regen > 0 {
+            self.hp = (self.hp + regen).min(self.max_hp);
+        }
+    }
+
+    /// Check if this enemy can teleport (Teleporting affix)
+    pub fn can_teleport(&self) -> bool {
+        self.elite_data.can_teleport()
+    }
+
+    /// Use teleport ability
+    pub fn use_teleport(&mut self) {
+        self.elite_data.use_teleport();
+    }
+
+    /// Check if this enemy can summon minions (Summoner affix)
+    pub fn can_summon(&self) -> bool {
+        self.elite_data.can_summon()
+    }
+
+    /// Use summon ability
+    pub fn use_summon(&mut self) {
+        self.elite_data.use_summon();
+    }
+
+    /// Check if this enemy can phase shift (Phasing affix)
+    pub fn can_phase(&self) -> bool {
+        self.elite_data.can_phase()
+    }
+
+    /// Use phase shift ability
+    pub fn use_phase(&mut self) {
+        self.elite_data.use_phase();
+    }
+
+    /// Record movement for TrailBlazer affix
+    pub fn record_movement(&mut self, from_x: usize, from_y: usize) {
+        self.elite_data.add_trail_position(from_x, from_y);
+    }
+
+    /// Get trail positions for TrailBlazer affix
+    pub fn get_trail_positions(&self) -> &[(usize, usize)] {
+        &self.elite_data.trail_positions
+    }
+
+    /// Check if this monster is currently phased (hard to hit)
+    pub fn is_phased(&self) -> bool {
+        self.elite_data.is_phased
+    }
+
+    /// Check if this monster is in berserker mode
+    pub fn is_berserk(&self) -> bool {
+        self.elite_data.is_berserk
+    }
+
+    /// Get explosion data if this enemy should explode on death
+    pub fn get_explosion_data(&self) -> Option<(i32, i32)> {
+        if self.elite_data.should_explode() {
+            Some((
+                self.elite_data.explosion_damage(self.attack),
+                self.elite_data.explosion_radius(),
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Check immunity to a status effect (from affixes)
+    pub fn is_immune_to(&self, effect: StatusEffect) -> bool {
+        self.elite_data.is_immune_to(effect)
     }
 
     /// Processes status effects, returns damage events
@@ -2891,6 +2967,7 @@ mod tests {
         assert_eq!(enemy.kind, EnemyKind::Goblin);
         assert!(enemy.crit_chance > 0.0);
         assert!(enemy.dodge_chance >= 0.0);
+        assert_eq!(enemy.elite_data.rarity, MonsterRarity::Normal);
     }
 
     #[test]
@@ -2964,5 +3041,418 @@ mod tests {
         let missed = AttackResult::missed();
         assert!(missed.is_dodged);
         assert_eq!(missed.final_damage, 0);
+    }
+
+    // ====== Elite/Champion Monster Tests ======
+
+    #[test]
+    fn test_monster_rarity_stat_multiplier() {
+        assert_eq!(MonsterRarity::Normal.stat_multiplier(), 1.0);
+        assert_eq!(MonsterRarity::Elite.stat_multiplier(), 1.5);
+        assert_eq!(MonsterRarity::Champion.stat_multiplier(), 2.0);
+        assert_eq!(MonsterRarity::Rare.stat_multiplier(), 1.75);
+        assert_eq!(MonsterRarity::Legendary.stat_multiplier(), 2.5);
+    }
+
+    #[test]
+    fn test_monster_rarity_affix_count() {
+        assert_eq!(MonsterRarity::Normal.affix_count(), (0, 0));
+        assert_eq!(MonsterRarity::Elite.affix_count(), (1, 2));
+        assert_eq!(MonsterRarity::Champion.affix_count(), (2, 3));
+        assert_eq!(MonsterRarity::Rare.affix_count(), (1, 2));
+        assert_eq!(MonsterRarity::Legendary.affix_count(), (3, 4));
+    }
+
+    #[test]
+    fn test_monster_affix_names() {
+        assert_eq!(MonsterAffix::Vampiric.name(), "Vampiric");
+        assert_eq!(MonsterAffix::Teleporting.name(), "Teleporting");
+        assert_eq!(MonsterAffix::Explosive.name(), "Explosive");
+        assert_eq!(MonsterAffix::Molten.name(), "Molten");
+        assert_eq!(MonsterAffix::Frozen.name(), "Frozen");
+    }
+
+    #[test]
+    fn test_monster_affix_offensive_defensive() {
+        assert!(MonsterAffix::Vampiric.is_offensive());
+        assert!(MonsterAffix::Explosive.is_offensive());
+        assert!(MonsterAffix::Molten.is_offensive());
+        assert!(!MonsterAffix::Shielded.is_offensive());
+
+        assert!(MonsterAffix::Shielded.is_defensive());
+        assert!(MonsterAffix::Regenerating.is_defensive());
+        assert!(MonsterAffix::Thorned.is_defensive());
+        assert!(!MonsterAffix::Vampiric.is_defensive());
+    }
+
+    #[test]
+    fn test_elite_enemy_creation() {
+        let mut rng = rand::thread_rng();
+        let elite = Enemy::new_elite(10, 10, EnemyKind::Orc, 5, MonsterRarity::Elite, &mut rng);
+
+        assert_eq!(elite.elite_data.rarity, MonsterRarity::Elite);
+        assert!(elite.is_elite());
+        assert!(!elite.is_champion());
+
+        // Elite should have 1-2 affixes
+        assert!(elite.elite_data.affixes.len() >= 1);
+        assert!(elite.elite_data.affixes.len() <= 2);
+
+        // Elite should have higher stats than normal
+        let normal = Enemy::new(10, 10, EnemyKind::Orc, 5);
+        assert!(elite.max_hp > normal.max_hp);
+        assert!(elite.attack > normal.attack);
+    }
+
+    #[test]
+    fn test_champion_enemy_creation() {
+        let mut rng = rand::thread_rng();
+        let champion = Enemy::new_elite(10, 10, EnemyKind::Troll, 10, MonsterRarity::Champion, &mut rng);
+
+        assert!(champion.is_champion());
+        assert!(champion.is_elite());
+
+        // Champion should have 2-3 affixes
+        assert!(champion.elite_data.affixes.len() >= 2);
+        assert!(champion.elite_data.affixes.len() <= 3);
+
+        // Champion should have 2x stats
+        let normal = Enemy::new(10, 10, EnemyKind::Troll, 10);
+        assert!((champion.max_hp as f32 / normal.max_hp as f32 - 2.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_legendary_enemy_creation() {
+        let mut rng = rand::thread_rng();
+        let legendary = Enemy::new_elite(10, 10, EnemyKind::Demon, 20, MonsterRarity::Legendary, &mut rng);
+
+        assert!(legendary.is_legendary());
+        assert!(legendary.is_elite());
+
+        // Legendary should have 3-4 affixes
+        assert!(legendary.elite_data.affixes.len() >= 3);
+        assert!(legendary.elite_data.affixes.len() <= 4);
+    }
+
+    #[test]
+    fn test_champion_pack_creation() {
+        let mut rng = rand::thread_rng();
+        let positions = vec![(5, 5), (6, 5), (5, 6), (6, 6)];
+
+        let (champion, minions, pack) = Enemy::create_champion_pack(
+            10, 10,
+            EnemyKind::Orc,
+            5,
+            &positions,
+            &mut rng,
+        );
+
+        assert!(champion.is_champion());
+        assert_eq!(pack.champion_id, champion.id);
+        assert!(pack.is_active);
+
+        for minion in &minions {
+            assert!(!minion.is_elite()); // Minions are normal
+            assert!(pack.is_minion(minion.id));
+        }
+
+        assert!(pack.contains(champion.id));
+        for minion in &minions {
+            assert!(pack.contains(minion.id));
+        }
+    }
+
+    #[test]
+    fn test_elite_data_display_name() {
+        let mut data = EliteData::normal();
+        assert_eq!(data.format_name("Orc"), "Orc");
+
+        data.rarity = MonsterRarity::Elite;
+        data.affixes = vec![MonsterAffix::Vampiric];
+        assert_eq!(data.format_name("Orc"), "Elite Orc [Vampiric]");
+
+        data.affixes = vec![MonsterAffix::Vampiric, MonsterAffix::Teleporting];
+        assert_eq!(data.format_name("Orc"), "Elite Orc [Vampiric, Teleporting]");
+    }
+
+    #[test]
+    fn test_vampiric_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Vampiric];
+
+        let life_steal = data.calculate_life_steal(100);
+        assert_eq!(life_steal, 20); // 20% life steal
+    }
+
+    #[test]
+    fn test_thorned_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Thorned];
+
+        let thorns = data.calculate_thorns_damage(100);
+        assert_eq!(thorns, 30); // 30% reflection
+    }
+
+    #[test]
+    fn test_regenerating_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Regenerating];
+
+        let regen = data.calculate_regen(1000);
+        assert_eq!(regen, 20); // 2% of max HP
+    }
+
+    #[test]
+    fn test_explosive_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Explosive];
+
+        assert!(data.should_explode());
+        assert_eq!(data.explosion_damage(50), 100); // 2x attack
+        assert_eq!(data.explosion_radius(), 3);
+    }
+
+    #[test]
+    fn test_undying_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Undying];
+
+        // Should survive fatal damage
+        assert!(data.check_undying(50, 100)); // 50 HP, 100 damage = would die
+        assert!(!data.check_undying(1, 100)); // Already at 1 HP = doesn't trigger again
+        assert!(!data.check_undying(50, 30)); // Damage doesn't kill = doesn't trigger
+    }
+
+    #[test]
+    fn test_berserker_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Berserker];
+
+        // Above 30% HP - no bonus
+        assert_eq!(data.total_attack_modifier(0.5), 1.0);
+
+        // Below 30% HP - 75% damage bonus
+        data.is_berserk = true;
+        // With berserker active at low HP
+        assert!((data.total_attack_modifier(0.25) - 1.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_assassin_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Assassin];
+        data.first_strike_available = true;
+
+        // First strike deals 3x damage
+        assert!((data.total_attack_modifier(1.0) - 3.0).abs() < 0.01);
+
+        // Consume first strike
+        data.consume_first_strike();
+        assert!(!data.first_strike_available);
+
+        // After first strike, normal damage
+        assert_eq!(data.total_attack_modifier(1.0), 1.0);
+    }
+
+    #[test]
+    fn test_affix_immunity() {
+        let mut data = EliteData::normal();
+
+        data.affixes = vec![MonsterAffix::FireImmune];
+        assert!(data.is_immune_to(StatusEffect::Burn));
+        assert!(!data.is_immune_to(StatusEffect::Freeze));
+
+        data.affixes = vec![MonsterAffix::ColdImmune];
+        assert!(data.is_immune_to(StatusEffect::Freeze));
+        assert!(!data.is_immune_to(StatusEffect::Burn));
+
+        data.affixes = vec![MonsterAffix::PoisonImmune];
+        assert!(data.is_immune_to(StatusEffect::Poison));
+
+        data.affixes = vec![MonsterAffix::Relentless];
+        assert!(data.is_immune_to(StatusEffect::Stun));
+        assert!(data.is_immune_to(StatusEffect::Freeze));
+        assert!(data.is_immune_to(StatusEffect::Confusion));
+    }
+
+    #[test]
+    fn test_teleporting_cooldown() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Teleporting];
+
+        assert!(data.can_teleport());
+
+        data.use_teleport();
+        assert!(!data.can_teleport());
+        assert_eq!(data.teleport_cooldown, 5);
+
+        // Tick 5 times
+        for _ in 0..5 {
+            data.tick();
+        }
+        assert!(data.can_teleport());
+    }
+
+    #[test]
+    fn test_phasing_affix() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Phasing];
+
+        assert!(data.can_phase());
+        assert!(!data.is_phased);
+
+        data.use_phase();
+        assert!(data.is_phased);
+        assert!(!data.can_phase());
+
+        // Total dodge bonus when phased is high
+        assert!(data.total_dodge_bonus() >= 0.5);
+    }
+
+    #[test]
+    fn test_on_hit_effects() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Molten, MonsterAffix::Jagged];
+
+        let effects = data.on_hit_effects();
+        assert!(effects.iter().any(|(e, _)| *e == StatusEffect::Burn));
+        assert!(effects.iter().any(|(e, _)| *e == StatusEffect::Bleed));
+    }
+
+    #[test]
+    fn test_armor_piercing() {
+        let data_no_pierce = EliteData::normal();
+        assert_eq!(data_no_pierce.armor_pierce_percent(), 0.0);
+
+        let mut data_pierce = EliteData::normal();
+        data_pierce.affixes = vec![MonsterAffix::ArmorPiercing];
+        assert_eq!(data_pierce.armor_pierce_percent(), 0.50);
+    }
+
+    #[test]
+    fn test_executioner_check() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::Executioner];
+
+        assert!(data.check_execute(0.05)); // 5% HP - triggers
+        assert!(!data.check_execute(0.15)); // 15% HP - doesn't trigger
+    }
+
+    #[test]
+    fn test_elite_enemy_display_name() {
+        let mut rng = rand::thread_rng();
+        let mut elite = Enemy::new_elite(10, 10, EnemyKind::Goblin, 5, MonsterRarity::Elite, &mut rng);
+
+        // Force specific affixes for testing
+        elite.elite_data.affixes = vec![MonsterAffix::Vampiric];
+
+        let name = elite.display_name();
+        assert!(name.contains("Elite"));
+        assert!(name.contains("Goblin"));
+        assert!(name.contains("Vampiric"));
+    }
+
+    #[test]
+    fn test_affix_rolling() {
+        let mut rng = rand::thread_rng();
+
+        // Roll many times and verify we get reasonable variety
+        let mut all_affixes = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let affixes = MonsterAffix::roll_affixes(2, 3, &mut rng);
+            assert!(affixes.len() >= 2);
+            assert!(affixes.len() <= 3);
+
+            // No duplicate affixes
+            let unique: std::collections::HashSet<_> = affixes.iter().collect();
+            assert_eq!(unique.len(), affixes.len());
+
+            for affix in affixes {
+                all_affixes.insert(affix);
+            }
+        }
+
+        // Should have rolled a good variety of affixes
+        assert!(all_affixes.len() > 10);
+    }
+
+    #[test]
+    fn test_champion_pack_on_death() {
+        let mut pack = ChampionPack::new(0, vec![1, 2, 3], &[MonsterAffix::Warcry]);
+
+        assert!(pack.is_active);
+        assert!(pack.pack_buffs.contains(&MonsterAffix::Warcry));
+        assert_eq!(pack.minion_damage_bonus(), 1.25);
+
+        pack.on_champion_death();
+
+        assert!(!pack.is_active);
+        assert!(pack.pack_buffs.is_empty());
+        assert_eq!(pack.minion_damage_bonus(), 1.0);
+    }
+
+    #[test]
+    fn test_rarity_roll_distribution() {
+        let mut rng = rand::thread_rng();
+        let mut counts = std::collections::HashMap::new();
+
+        // Roll many times
+        for _ in 0..1000 {
+            let rarity = MonsterRarity::roll(15, 0.0, &mut rng);
+            *counts.entry(rarity).or_insert(0) += 1;
+        }
+
+        // Normal should be most common
+        assert!(counts.get(&MonsterRarity::Normal).unwrap_or(&0) > &500);
+        // Legendary should be rare
+        assert!(counts.get(&MonsterRarity::Legendary).unwrap_or(&0) < &50);
+    }
+
+    #[test]
+    fn test_elite_xp_bonus() {
+        let normal = Enemy::new(10, 10, EnemyKind::Orc, 5);
+        let mut rng = rand::thread_rng();
+        let elite = Enemy::new_elite(10, 10, EnemyKind::Orc, 5, MonsterRarity::Elite, &mut rng);
+
+        // Elite XP should be 2.5x normal
+        let ratio = elite.xp_value as f32 / normal.xp_value as f32;
+        assert!((ratio - 2.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_trail_blazer() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::TrailBlazer];
+
+        data.add_trail_position(5, 5);
+        data.add_trail_position(5, 6);
+        data.add_trail_position(5, 7);
+
+        assert_eq!(data.trail_positions.len(), 3);
+        assert_eq!(data.trail_positions[0], (5, 5));
+        assert_eq!(data.trail_positions[2], (5, 7));
+    }
+
+    #[test]
+    fn test_adaptive_armor() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::AdaptiveArmor];
+
+        // Large hit triggers shield
+        data.on_damage_taken(30, 100);
+        assert!(data.adaptive_shield > 0);
+
+        // Shield absorbs damage
+        let reduced = data.apply_adaptive_armor(10);
+        assert!(reduced < 10);
+    }
+
+    #[test]
+    fn test_mana_drain() {
+        let mut data = EliteData::normal();
+        data.affixes = vec![MonsterAffix::ManaDrain];
+
+        let drain = data.calculate_mana_drain(100);
+        assert_eq!(drain, 10); // 10% of damage
     }
 }

@@ -8,11 +8,12 @@ use serde::{Serialize, Deserialize};
 use crate::classes::CharacterClass;
 use crate::combat::StatusEffect;
 use crate::entities::{Enemy, EnemyKind, Player};
-use crate::items::{Item, ItemKind, Rarity};
+use crate::items::{Item, ItemKind, Rarity, EquipSlot};
 use crate::magic::Skill;
 use crate::world::{Map, Room, Tile, BOSS_LEVELS, MAX_DUNGEON_LEVEL, MAP_WIDTH, MAP_HEIGHT};
 use crate::ai::{AIAction, AIDecider};
 use crate::quests::{QuestTracker, QuestReward, QuestId};
+use crate::achievements::{AchievementTracker, AchievementId};
 
 /// A message with an associated color index
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -471,8 +472,8 @@ impl GameState {
             return;
         }
 
-        // Check for shrine
-        if self.map.tiles[new_y][new_x] == Tile::Shrine {
+        // Check for shrine (any type)
+        if self.map.tiles[new_y][new_x].is_shrine() {
             self.use_shrine(new_x, new_y);
             return;
         }

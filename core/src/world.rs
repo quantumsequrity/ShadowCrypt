@@ -555,7 +555,37 @@ pub struct Room {
 impl Room {
     /// Create a new room
     pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
-        Self { x, y, width, height, is_boss_room: false }
+        Self {
+            x,
+            y,
+            width,
+            height,
+            is_boss_room: false,
+            room_type: SpecialRoomType::Normal,
+            cleared: false,
+            difficulty: 1,
+        }
+    }
+
+    /// Create a new room with a specific type
+    pub fn new_special(
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        room_type: SpecialRoomType,
+        difficulty: u8,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+            is_boss_room: matches!(room_type, SpecialRoomType::BossArena),
+            room_type,
+            cleared: false,
+            difficulty,
+        }
     }
 
     /// Returns the center point of the room
@@ -578,6 +608,53 @@ impl Room {
             rng.gen_range(self.y + 1..self.y + self.height - 1),
         )
     }
+
+    /// Returns all floor positions in this room
+    pub fn floor_positions(&self) -> Vec<(usize, usize)> {
+        let mut positions = Vec::new();
+        for y in (self.y + 1)..(self.y + self.height - 1) {
+            for x in (self.x + 1)..(self.x + self.width - 1) {
+                positions.push((x, y));
+            }
+        }
+        positions
+    }
+
+    /// Returns the corner positions of the room (inside)
+    pub fn corner_positions(&self) -> [(usize, usize); 4] {
+        [
+            (self.x + 1, self.y + 1),                           // Top-left
+            (self.x + self.width - 2, self.y + 1),              // Top-right
+            (self.x + 1, self.y + self.height - 2),             // Bottom-left
+            (self.x + self.width - 2, self.y + self.height - 2), // Bottom-right
+        ]
+    }
+
+    /// Returns positions along the room perimeter (inside walls)
+    pub fn perimeter_positions(&self) -> Vec<(usize, usize)> {
+        let mut positions = Vec::new();
+        // Top and bottom edges
+        for x in (self.x + 1)..(self.x + self.width - 1) {
+            positions.push((x, self.y + 1));
+            positions.push((x, self.y + self.height - 2));
+        }
+        // Left and right edges (excluding corners already added)
+        for y in (self.y + 2)..(self.y + self.height - 2) {
+            positions.push((self.x + 1, y));
+            positions.push((self.x + self.width - 2, y));
+        }
+        positions
+    }
+
+    /// Returns whether a position is inside this room
+    pub fn contains(&self, x: usize, y: usize) -> bool {
+        x > self.x && x < self.x + self.width - 1 && y > self.y && y < self.y + self.height - 1
+    }
+
+    /// Marks this room as cleared
+    pub fn mark_cleared(&mut self) {
+        self.cleared = true;
+    }
 }
 
 /// The dungeon map
@@ -588,6 +665,10 @@ pub struct Map {
     pub explored: Vec<Vec<bool>>,
     pub rooms: Vec<Room>,
     pub theme: DungeonTheme,
+    /// Indices of special rooms in the rooms vector
+    pub special_room_indices: Vec<usize>,
+    /// Whether a merchant has been generated on this level
+    pub has_merchant: bool,
 }
 
 impl Map {
@@ -599,6 +680,8 @@ impl Map {
             explored: vec![vec![false; MAP_WIDTH]; MAP_HEIGHT],
             rooms: Vec::new(),
             theme: DungeonTheme::Dungeon,
+            special_room_indices: Vec::new(),
+            has_merchant: false,
         }
     }
 
@@ -611,6 +694,8 @@ impl Map {
         self.tiles = vec![vec![Tile::Wall; MAP_WIDTH]; MAP_HEIGHT];
         self.visible = vec![vec![false; MAP_WIDTH]; MAP_HEIGHT];
         self.rooms.clear();
+        self.special_room_indices.clear();
+        self.has_merchant = false;
 
         let is_boss_level = BOSS_LEVELS.contains(&level);
 

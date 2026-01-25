@@ -769,6 +769,7 @@ impl Default for ShadowCryptApp {
             settings: Settings::default(),
             show_settings: false,
             settings_tab: SettingsTab::Display,
+            last_turn_count: 0,
         }
     }
 }
@@ -905,6 +906,16 @@ impl ShadowCryptApp {
         self.last_update = std::time::Instant::now();
 
         let state = self.state.as_ref().unwrap();
+
+        // Tick cooldowns when turns pass
+        if state.turn_count > self.last_turn_count {
+            let turns_passed = state.turn_count - self.last_turn_count;
+            for (_skill, cd) in self.skill_cooldowns.iter_mut() {
+                *cd = cd.saturating_sub(turns_passed);
+            }
+            self.skill_cooldowns.retain(|_, cd| *cd > 0);
+            self.last_turn_count = state.turn_count;
+        }
 
         // Check game state
         if state.game_over {
@@ -1251,12 +1262,35 @@ impl ShadowCryptApp {
                     self.lighting.set_theme(state.map.theme, state.dungeon_level);
                 }
 
-                // Skills
+                // Skills - Space to use current skill
                 if i.key_pressed(egui::Key::Space) {
-                    state.use_skill();
+                    let skill_idx = state.player.active_skill;
+                    if skill_idx < state.player.skills.len() {
+                        let skill = state.player.skills[skill_idx];
+                        let cooldown = *self.skill_cooldowns.get(&skill).unwrap_or(&0);
+                        if cooldown == 0 && state.player.mana >= skill.mana_cost() {
+                            state.use_skill();
+                            let max_cd = get_max_cooldown(skill);
+                            self.skill_cooldowns.insert(skill, max_cd);
+                        }
+                    }
                 }
                 if i.key_pressed(egui::Key::Tab) {
                     state.cycle_skill();
+                }
+
+                // Direct skill activation with F1-F4 keys
+                if i.key_pressed(egui::Key::F1) {
+                    self.activate_skill_by_index(0);
+                }
+                if i.key_pressed(egui::Key::F2) {
+                    self.activate_skill_by_index(1);
+                }
+                if i.key_pressed(egui::Key::F3) {
+                    self.activate_skill_by_index(2);
+                }
+                if i.key_pressed(egui::Key::F4) {
+                    self.activate_skill_by_index(3);
                 }
 
                 // Stairs

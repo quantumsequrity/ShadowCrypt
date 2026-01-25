@@ -953,12 +953,61 @@ pub struct Item {
     pub y: usize,
     pub kind: ItemKind,
     pub rarity: Rarity,
+    /// Food quality (only relevant for food items)
+    pub food_quality: Option<FoodQuality>,
+    /// Turns until food spoils (0 = doesn't spoil)
+    pub spoil_timer: u32,
 }
 
 impl Item {
     /// Create a new item at the given position
     pub fn new(x: usize, y: usize, kind: ItemKind, rarity: Rarity) -> Self {
-        Self { x, y, kind, rarity }
+        let (food_quality, spoil_timer) = if kind.is_food() {
+            let quality = kind.default_food_quality();
+            // Foods can spoil over time (except legendary and rotten)
+            let timer = if quality.can_spoil() { 500 } else { 0 };
+            (Some(quality), timer)
+        } else {
+            (None, 0)
+        };
+
+        Self { x, y, kind, rarity, food_quality, spoil_timer }
+    }
+
+    /// Create a food item with specific quality
+    pub fn new_food(x: usize, y: usize, kind: ItemKind, quality: FoodQuality) -> Self {
+        let spoil_timer = if quality.can_spoil() { 500 } else { 0 };
+        Self {
+            x,
+            y,
+            kind,
+            rarity: Rarity::Common,
+            food_quality: Some(quality),
+            spoil_timer,
+        }
+    }
+
+    /// Get the food quality, defaulting to Fresh if not set
+    pub fn get_food_quality(&self) -> FoodQuality {
+        self.food_quality.unwrap_or(self.kind.default_food_quality())
+    }
+
+    /// Tick the spoil timer and potentially degrade quality
+    pub fn tick_spoil(&mut self) -> bool {
+        if self.spoil_timer > 0 {
+            self.spoil_timer -= 1;
+            if self.spoil_timer == 0 {
+                if let Some(ref mut quality) = self.food_quality {
+                    *quality = quality.spoiled();
+                    // Reset timer if can still spoil further
+                    if quality.can_spoil() {
+                        self.spoil_timer = 300;
+                    }
+                    return true; // Quality changed
+                }
+            }
+        }
+        false
     }
 
     /// Returns the stats of this item scaled by rarity

@@ -17,6 +17,7 @@
 //! - `game` - Main game state and logic
 //! - `save` - Save/load functionality
 //! - `time` - Day/night cycle system with time-based events
+//! - `achievements` - Achievement system and tracking
 //!
 //! # Example Usage
 //!
@@ -44,14 +45,16 @@ pub mod combat;
 pub mod items;
 pub mod entities;
 pub mod world;
+pub mod weather;
 pub mod ai;
 pub mod companions;
 pub mod challenges;
-pub mod corruption;
 pub mod game;
 pub mod save;
 pub mod quests;
 pub mod time;
+pub mod achievements;
+pub mod runes;
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -81,6 +84,14 @@ pub mod prelude {
         CreatureActivity, MINUTES_PER_TURN, MINUTES_PER_DAY,
         BASE_VIEW_RADIUS, MIN_VIEW_RADIUS,
     };
+    pub use crate::achievements::{
+        Achievement, AchievementId, AchievementCategory, AchievementTracker,
+        AchievementReward, AchievementStats, RunStats, StatType,
+    };
+    pub use crate::runes::{
+        RuneType, Rune, RuneEffect, RuneWordType, SocketedItem,
+        RuneInventory, RuneStatBonuses, RuneCrafter, CraftingMaterial,
+    };
 }
 
 // Re-export commonly used types at crate root
@@ -106,4 +117,8 @@ pub use time::{
     TimeSystem, TimePhase, TimeEvent, TimeModifiers, TimeEffect,
     CreatureActivity, MINUTES_PER_TURN, MINUTES_PER_DAY,
     BASE_VIEW_RADIUS, MIN_VIEW_RADIUS,
+};
+pub use achievements::{
+    Achievement, AchievementId, AchievementCategory, AchievementTracker,
+    AchievementReward, AchievementStats, RunStats, StatType,
 };
