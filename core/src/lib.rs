@@ -62,6 +62,18 @@ pub mod runes;
 pub mod crafting;
 pub mod talents;
 pub mod gambling;
+pub mod species;
+pub mod magic_schools;
+pub mod kingdoms;
+pub mod guilds;
+pub mod party;
+pub mod portals;
+pub mod tower;
+pub mod npcs;
+pub mod stealth;
+pub mod brewing;
+pub mod leaderboard;
+pub mod lore;
 
 /// Prelude module for convenient imports
 pub mod prelude {
