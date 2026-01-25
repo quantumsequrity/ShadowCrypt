@@ -298,6 +298,34 @@ impl Tile {
             Self::SupplyCrate => 12,         // DarkYellow (wood)
             Self::WeaponRack => 2,           // White (metal)
             Self::PotionShelf => 13,         // Magenta (magical)
+            // Secret passages
+            Self::SecretDoor => 0,           // DarkGrey (hidden)
+            Self::RevealedSecretDoor => 11,  // Yellow
+            // Environmental hazards
+            Self::PoisonGas | Self::SporeColony => 5,  // Green
+            Self::CrumblingFloor => 12,      // DarkYellow
+            Self::BrokenFloor | Self::Rubble => 0, // DarkGrey
+            Self::AcidPool => 5,             // Green
+            Self::FrozenGround => 9,         // Cyan
+            Self::ScorchedEarth => 3,        // Red
+            // Additional decorations
+            Self::Cobweb | Self::Bones => 2, // White
+            Self::Bookshelf => 12,           // DarkYellow
+            Self::ArmorStand => 1,           // Grey
+            Self::Altar | Self::MagicCircle => 13, // Magenta
+            Self::Sarcophagus => 1,          // Grey
+            Self::Fountain => 9,             // Cyan
+            Self::BrokenFountain | Self::CrackedStatue => 0, // DarkGrey
+            Self::Statue => 2,               // White
+            Self::Brazier => 3,              // Red
+            Self::UnlitBrazier => 0,         // DarkGrey
+            Self::Vines => 5,                // Green
+            Self::Mushrooms => 12,           // DarkYellow
+            Self::GlowingMushrooms | Self::CrystalFormation => 9, // Cyan
+            Self::MineCart => 12,            // DarkYellow
+            Self::Rails => 1,                // Grey
+            Self::LockedChest => 11,         // Yellow
+            Self::MimicChest => 11,          // Yellow (indistinguishable)
         }
     }
 

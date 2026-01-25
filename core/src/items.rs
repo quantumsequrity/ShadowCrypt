@@ -1640,7 +1640,97 @@ mod tests {
     fn test_item_stats_scale_with_rarity() {
         let common = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
         let legendary = Item::new(0, 0, ItemKind::LongSword, Rarity::Legendary);
-
         assert!(legendary.stats().0 > common.stats().0);
+    }
+
+    // Enchantment tests
+    #[test]
+    fn test_enchantment_creation() {
+        let ench = Enchantment::new(EnchantmentType::Sharpness, 3);
+        assert_eq!(ench.enchant_type, EnchantmentType::Sharpness);
+        assert_eq!(ench.level, 3);
+    }
+
+    #[test]
+    fn test_add_enchantment() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Rare);
+        assert!(item.add_enchantment(Enchantment::new(EnchantmentType::Sharpness, 2)));
+        assert!(item.has_enchantment(EnchantmentType::Sharpness));
+        assert_eq!(item.enchantment_level(EnchantmentType::Sharpness), 2);
+    }
+
+    #[test]
+    fn test_enchantment_stat_bonus() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
+        let base_atk = item.stats().0;
+        item.add_enchantment(Enchantment::new(EnchantmentType::Sharpness, 2));
+        assert!(item.stats().0 > base_atk);
+    }
+
+    // Unique item tests
+    #[test]
+    fn test_unique_item_creation() {
+        let item = Item::new_unique(0, 0, UniqueItem::Excalibur);
+        assert!(item.unique.is_some());
+        assert_eq!(item.rarity, Rarity::Mythic);
+        assert!(!item.identified);
+    }
+
+    #[test]
+    fn test_unique_item_stats() {
+        let item = Item::new_unique(0, 0, UniqueItem::Excalibur);
+        let (atk, def, hp, mana) = item.stats();
+        assert_eq!(atk, 50); assert_eq!(def, 10); assert_eq!(hp, 30); assert_eq!(mana, 20);
+    }
+
+    // Set bonus tests
+    #[test]
+    fn test_item_set_membership() {
+        let item = Item::new(0, 0, ItemKind::DragonHelm, Rarity::Legendary);
+        assert_eq!(item.item_set(), Some(ItemSet::DragonSlayer));
+    }
+
+    #[test]
+    fn test_set_bonus_calculation() {
+        let mut equipment = EquipmentSet::new();
+        equipment.equip(Item::new(0, 0, ItemKind::DragonHelm, Rarity::Legendary));
+        equipment.equip(Item::new(0, 0, ItemKind::DragonArmor, Rarity::Legendary));
+        let bonuses = equipment.get_active_set_bonuses();
+        assert!(!bonuses.is_empty());
+    }
+
+    // Item upgrade tests
+    #[test]
+    fn test_item_upgrade() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
+        let base_atk = item.stats().0;
+        assert!(item.upgrade());
+        assert_eq!(item.upgrade_level, 1);
+        assert!(item.stats().0 > base_atk);
+    }
+
+    #[test]
+    fn test_item_durability() {
+        let mut item = Item::new(0, 0, ItemKind::LongSword, Rarity::Common);
+        assert_eq!(item.durability, 100);
+        item.damage(50);
+        assert_eq!(item.durability, 50);
+        item.repair(30);
+        assert_eq!(item.durability, 80);
+        item.damage(100);
+        assert!(item.is_broken());
+    }
+
+    // Crafting tests
+    #[test]
+    fn test_crafting_recipes_exist() {
+        let recipes = get_crafting_recipes();
+        assert!(!recipes.is_empty());
+    }
+
+    #[test]
+    fn test_crafting_material_rarity() {
+        assert_eq!(CraftingMaterial::IronOre.rarity(), Rarity::Common);
+        assert_eq!(CraftingMaterial::PrimordialShard.rarity(), Rarity::Mythic);
     }
 }

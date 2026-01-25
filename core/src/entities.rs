@@ -857,6 +857,8 @@ impl Player {
             satiation_bonus: None,
             cooking_skill: 0,
             meals_cooked: 0,
+            base_elemental_resistances: class.elemental_resistances(),
+            temp_elemental_resistances: HashMap::new(),
         }
     }
 

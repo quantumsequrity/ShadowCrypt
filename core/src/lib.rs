@@ -20,6 +20,7 @@
 //! - `achievements` - Achievement system and tracking
 //! - `runes` - Rune system with socketing, rune words, and crafting
 //! - `corruption` - Corruption/sanity system with visual distortions and madness effects
+//! - `gambling` - Gambling system with NPCs, mystery items, and risk/reward mechanics
 //!
 //! # Example Usage
 //!
@@ -60,6 +61,7 @@ pub mod achievements;
 pub mod runes;
 pub mod crafting;
 pub mod talents;
+pub mod gambling;
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -98,6 +100,12 @@ pub mod prelude {
         RuneType, Rune, RuneEffect, RuneWordType, SocketedItem,
         RuneInventory, RuneStatBonuses, RuneCrafter, CraftingMaterial,
     };
+    pub use crate::gambling::{
+        GamblerKind, GamblerRarity, Gambler, GamblingGame, GambleOutcome,
+        GamblingStats, GamblingDen, GamblingEvent, MysteryBoxTier, RiskTier,
+        MAX_WAGER, MIN_WAGER, STREAK_BONUS_THRESHOLD,
+        generate_gambling_encounters,
+    };
 }
 
 // Re-export commonly used types at crate root
@@ -134,4 +142,12 @@ pub use achievements::{
 pub use talents::{
     TalentId, Talent, TalentTree, TalentEffect, PlayerTalents, TalentStatBonuses,
     Element, TALENT_POINTS_PER_LEVEL, BONUS_POINTS_AT_LEVELS,
+};
+
+// Gambling system re-exports
+pub use gambling::{
+    GamblerKind, GamblerRarity, Gambler, GamblingGame, GambleOutcome,
+    GamblingStats, GamblingDen, GamblingEvent, MysteryBoxTier, RiskTier,
+    MAX_WAGER, MIN_WAGER, STREAK_BONUS_THRESHOLD,
+    generate_gambling_encounters,
 };

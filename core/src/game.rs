@@ -857,6 +857,13 @@ impl GameState {
     /// End the current turn
     pub fn end_turn(&mut self) {
         self.turn_count += 1;
+
+        // Check combo kills for achievements at end of turn
+        self.achievement_tracker.check_combo_kills(self.turn_count);
+
+        // Reset turn-based achievement tracking
+        self.achievement_tracker.reset_turn();
+
         self.enemy_turn();
 
         // Tick player status effects
@@ -871,6 +878,9 @@ impl GameState {
                 self.add_message(msg, 3);
             }
         }
+
+        // Track hunger for achievements
+        self.achievement_tracker.record_hunger(self.player.hunger, self.player.max_hunger, self.turn_count);
 
         // Regeneration from ring
         if self.player.equipment.values().any(|i| i.kind == ItemKind::RingOfRegeneration) {
@@ -887,11 +897,41 @@ impl GameState {
             }
         }
 
+        // Track HP status for achievements
+        self.achievement_tracker.record_hp_status(self.player.hp, self.turn_count);
+
+        // Track equipment status for achievements
+        self.check_equipment_achievements();
+
         // Check death
         if self.player.hp <= 0 {
             self.game_over = true;
             self.add_message("You have died! Game Over.".to_string(), 3);
+            // Track death for achievements
+            self.achievement_tracker.record_death(self.turn_count);
         }
+
+        // Pop achievement notifications
+        while let Some(notification) = self.achievement_tracker.pop_notification() {
+            self.add_message(notification, 11);
+        }
+    }
+
+    /// Check equipment-related achievements
+    fn check_equipment_achievements(&mut self) {
+        let equipped_slots = self.player.equipment.len();
+        let legendary_count = self.player.equipment.values()
+            .filter(|item| item.rarity >= Rarity::Legendary)
+            .count();
+        let has_both_rings = self.player.equipment.contains_key(&EquipSlot::Ring1)
+            && self.player.equipment.contains_key(&EquipSlot::Ring2);
+
+        self.achievement_tracker.record_fully_equipped(
+            equipped_slots,
+            legendary_count,
+            has_both_rings,
+            self.turn_count
+        );
     }
 
     /// Process enemy turns

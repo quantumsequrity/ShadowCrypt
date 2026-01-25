@@ -582,6 +582,162 @@ pub enum SettingsTab {
 }
 
 // ============================================================================
+// Minimap System
+// ============================================================================
+
+/// Corner position for the minimap overlay
+#[derive(Clone, Copy, PartialEq)]
+pub enum MinimapCorner { TopLeft, TopRight, BottomLeft, BottomRight }
+
+/// Configuration for the minimap overlay
+#[derive(Clone)]
+pub struct MinimapConfig {
+    pub visible: bool,
+    pub zoom: f32,
+    pub min_zoom: f32,
+    pub max_zoom: f32,
+    pub corner: MinimapCorner,
+    pub margin: f32,
+    pub background_opacity: f32,
+    pub show_enemies: bool,
+    pub show_items: bool,
+}
+
+impl Default for MinimapConfig {
+    fn default() -> Self {
+        Self { visible: true, zoom: 2.5, min_zoom: 1.0, max_zoom: 6.0, corner: MinimapCorner::TopRight, margin: 10.0, background_opacity: 0.85, show_enemies: true, show_items: true }
+    }
+}
+
+/// Minimap renderer - displays a small overview map in a corner of the screen
+pub struct Minimap { config: MinimapConfig }
+
+impl Minimap {
+    pub fn new() -> Self { Self { config: MinimapConfig::default() } }
+    pub fn zoom_in(&mut self) { self.config.zoom = (self.config.zoom + 0.5).min(self.config.max_zoom); }
+    pub fn zoom_out(&mut self) { self.config.zoom = (self.config.zoom - 0.5).max(self.config.min_zoom); }
+    pub fn toggle(&mut self) { self.config.visible = !self.config.visible; }
+    pub fn cycle_corner(&mut self) {
+        self.config.corner = match self.config.corner {
+            MinimapCorner::TopRight => MinimapCorner::BottomRight, MinimapCorner::BottomRight => MinimapCorner::BottomLeft,
+            MinimapCorner::BottomLeft => MinimapCorner::TopLeft, MinimapCorner::TopLeft => MinimapCorner::TopRight,
+        };
+    }
+    fn calculate_size(&self) -> egui::Vec2 { egui::vec2(MAP_WIDTH as f32 * self.config.zoom, MAP_HEIGHT as f32 * self.config.zoom) }
+
+    pub fn render(&self, painter: &egui::Painter, available_rect: egui::Rect, state: &GameState, theme_fog_color: Color) {
+        if !self.config.visible { return; }
+        let minimap_size = self.calculate_size();
+        let margin = self.config.margin;
+        let controls_height = 35.0;
+        let minimap_pos = match self.config.corner {
+            MinimapCorner::TopLeft => egui::pos2(available_rect.min.x + margin, available_rect.min.y + margin + controls_height),
+            MinimapCorner::TopRight => egui::pos2(available_rect.max.x - minimap_size.x - margin, available_rect.min.y + margin + controls_height),
+            MinimapCorner::BottomLeft => egui::pos2(available_rect.min.x + margin, available_rect.max.y - minimap_size.y - margin),
+            MinimapCorner::BottomRight => egui::pos2(available_rect.max.x - minimap_size.x - margin, available_rect.max.y - minimap_size.y - margin),
+        };
+        let minimap_rect = egui::Rect::from_min_size(minimap_pos, minimap_size);
+        let bg_color = egui::Color32::from_rgba_unmultiplied(5, 5, 10, (self.config.background_opacity * 255.0) as u8);
+        painter.rect_filled(minimap_rect, 3.0, bg_color);
+        painter.rect_stroke(minimap_rect, 3.0, egui::Stroke::new(1.5, egui::Color32::from_rgb(60, 60, 80)));
+        let zoom = self.config.zoom;
+
+        // Draw tiles
+        for y in 0..MAP_HEIGHT {
+            for x in 0..MAP_WIDTH {
+                let tile_rect = egui::Rect::from_min_size(egui::pos2(minimap_pos.x + x as f32 * zoom, minimap_pos.y + y as f32 * zoom), egui::vec2(zoom, zoom));
+                if !minimap_rect.contains(tile_rect.center()) { continue; }
+                let is_explored = state.map.explored[y][x];
+                let is_visible = state.map.visible[y][x];
+                if is_explored {
+                    let tile = state.map.tiles[y][x];
+                    let base_color = match tile {
+                        Tile::Floor => if is_visible { egui::Color32::from_rgb(50, 50, 60) } else { egui::Color32::from_rgb(30, 30, 35) },
+                        Tile::Wall => if is_visible { egui::Color32::from_rgb(80, 75, 70) } else { egui::Color32::from_rgb(45, 42, 40) },
+                        Tile::StairsDown => egui::Color32::from_rgb(100, 200, 100),
+                        Tile::StairsUp => egui::Color32::from_rgb(100, 150, 200),
+                        Tile::Door | Tile::LockedDoor => egui::Color32::from_rgb(139, 90, 43),
+                        Tile::SecretDoor => if is_visible { egui::Color32::from_rgb(100, 80, 60) } else { egui::Color32::from_rgb(45, 42, 40) },
+                        Tile::Trap | Tile::PoisonTrap | Tile::TeleportTrap => if is_visible { egui::Color32::from_rgb(180, 50, 50) } else { egui::Color32::from_rgb(30, 30, 35) },
+                        Tile::Water | Tile::DeepWater => egui::Color32::from_rgb(30, 80, 150),
+                        Tile::Lava => egui::Color32::from_rgb(200, 80, 30),
+                        Tile::Ice => egui::Color32::from_rgb(150, 200, 230),
+                        Tile::Shrine => egui::Color32::from_rgb(180, 150, 220),
+                        Tile::Chest => egui::Color32::from_rgb(200, 180, 50),
+                        Tile::BossGate => egui::Color32::from_rgb(200, 50, 50),
+                        Tile::Pillar => egui::Color32::from_rgb(100, 100, 110),
+                        Tile::Rubble => egui::Color32::from_rgb(60, 55, 50),
+                        Tile::Grass => egui::Color32::from_rgb(40, 80, 40),
+                        Tile::Tree => egui::Color32::from_rgb(30, 100, 30),
+                        Tile::Void => egui::Color32::from_rgb(10, 5, 15),
+                    };
+                    painter.rect_filled(tile_rect, 0.0, base_color);
+                }
+            }
+        }
+
+        // Draw items
+        if self.config.show_items {
+            for item in &state.items {
+                if state.map.explored[item.y][item.x] {
+                    let pos = egui::pos2(minimap_pos.x + item.x as f32 * zoom + zoom / 2.0, minimap_pos.y + item.y as f32 * zoom + zoom / 2.0);
+                    painter.circle_filled(pos, (zoom * 0.4).max(1.5), to_egui_color(rarity_color(item.rarity)));
+                }
+            }
+        }
+
+        // Draw enemies
+        if self.config.show_enemies {
+            for enemy in state.enemies.iter().filter(|e| e.is_alive()) {
+                if state.map.visible[enemy.y][enemy.x] {
+                    let pos = egui::pos2(minimap_pos.x + enemy.x as f32 * zoom + zoom / 2.0, minimap_pos.y + enemy.y as f32 * zoom + zoom / 2.0);
+                    let color = if enemy.is_boss { egui::Color32::from_rgb(255, 50, 200) } else {
+                        let threat = (enemy.max_hp as f32 / 50.0).min(1.0);
+                        egui::Color32::from_rgb((150.0 + 105.0 * threat) as u8, (50.0 * (1.0 - threat)) as u8, (50.0 * (1.0 - threat)) as u8)
+                    };
+                    let dot_size = if enemy.is_boss { (zoom * 0.7).max(3.0) } else { (zoom * 0.45).max(2.0) };
+                    painter.circle_filled(pos, dot_size, color);
+                }
+            }
+        }
+
+        // Draw player with glow
+        let player_pos = egui::pos2(minimap_pos.x + state.player.x as f32 * zoom + zoom / 2.0, minimap_pos.y + state.player.y as f32 * zoom + zoom / 2.0);
+        painter.circle_filled(player_pos, (zoom * 0.8).max(4.0), egui::Color32::from_rgba_unmultiplied(255, 255, 100, 80));
+        painter.circle_filled(player_pos, (zoom * 0.5).max(2.5), egui::Color32::from_rgb(255, 255, 100));
+
+        // Fog overlay for unexplored
+        let fog = egui::Color32::from_rgba_unmultiplied(theme_fog_color.r, theme_fog_color.g, theme_fog_color.b, 40);
+        for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+            if !state.map.explored[y][x] {
+                let tile_rect = egui::Rect::from_min_size(egui::pos2(minimap_pos.x + x as f32 * zoom, minimap_pos.y + y as f32 * zoom), egui::vec2(zoom, zoom));
+                if minimap_rect.contains(tile_rect.center()) { painter.rect_filled(tile_rect, 0.0, fog); }
+            }
+        }}
+
+        // Visible area highlight
+        let vis = egui::Color32::from_rgba_unmultiplied(255, 255, 200, 15);
+        for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+            if state.map.visible[y][x] {
+                let tile_rect = egui::Rect::from_min_size(egui::pos2(minimap_pos.x + x as f32 * zoom, minimap_pos.y + y as f32 * zoom), egui::vec2(zoom, zoom));
+                if minimap_rect.contains(tile_rect.center()) { painter.rect_filled(tile_rect, 0.0, vis); }
+            }
+        }}
+
+        // Controls and legend
+        let ctrl_y = match self.config.corner { MinimapCorner::TopLeft | MinimapCorner::TopRight => minimap_rect.min.y - 30.0, _ => minimap_rect.max.y + 5.0 };
+        painter.text(egui::pos2(minimap_rect.min.x, ctrl_y), egui::Align2::LEFT_TOP, format!("MINIMAP [{:.1}x]", self.config.zoom), egui::FontId::proportional(12.0), egui::Color32::from_rgb(150, 150, 170));
+        painter.text(egui::pos2(minimap_rect.min.x, ctrl_y + 14.0), egui::Align2::LEFT_TOP, "[M] toggle  [+/-] zoom  [P] corner", egui::FontId::proportional(10.0), egui::Color32::from_rgb(100, 100, 120));
+        let leg_y = match self.config.corner { MinimapCorner::TopLeft | MinimapCorner::TopRight => minimap_rect.max.y + 5.0, _ => minimap_rect.min.y - 15.0 };
+        let legends = [("@", egui::Color32::from_rgb(255, 255, 100)), ("Enemy", egui::Color32::from_rgb(200, 50, 50)), ("Boss", egui::Color32::from_rgb(255, 50, 200)), ("Stairs", egui::Color32::from_rgb(100, 200, 100))];
+        let mut lx = minimap_rect.min.x;
+        for (lbl, col) in legends { painter.circle_filled(egui::pos2(lx + 5.0, leg_y + 5.0), 3.0, col); painter.text(egui::pos2(lx + 12.0, leg_y), egui::Align2::LEFT_TOP, lbl, egui::FontId::proportional(10.0), egui::Color32::from_rgb(100, 100, 120)); lx += 50.0; }
+    }
+}
+
+impl Default for Minimap { fn default() -> Self { Self::new() } }
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 

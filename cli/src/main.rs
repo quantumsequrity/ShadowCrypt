@@ -1671,6 +1671,72 @@ fn render_with_targeting(state: &GameState, movement: Option<&MovementState>, ta
     render_full(state, movement, targeting, None)
 }
 
+fn render_with_message_log(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>, msg_log: Option<&MessageLog>) -> std::io::Result<()> {
+    render_full(state, movement, targeting, msg_log)
+}
+
+/// Render the enhanced message log with timestamps, categories, and scroll indicators
+fn render_message_log(stdout: &mut std::io::Stdout, msg_log: &MessageLog, stats_y: u16) -> std::io::Result<()> {
+    // Message log header with filter and scroll info
+    execute!(stdout, MoveTo(0, stats_y + 2), Clear(ClearType::CurrentLine))?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, "--- Messages ")?;
+
+    // Filter indicator
+    execute!(stdout, SetForegroundColor(msg_log.get_filter().label_color()))?;
+    write!(stdout, "[{}]", msg_log.get_filter().name())?;
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, " {} ", msg_log.scroll_info())?;
+
+    // Scroll arrows
+    if msg_log.can_scroll_up() {
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "[PgUp]")?;
+    }
+    if msg_log.can_scroll_down() {
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "[PgDn]")?;
+    }
+    execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+    write!(stdout, " [m:Filter] ---")?;
+    execute!(stdout, ResetColor)?;
+
+    // Render visible messages
+    let visible = msg_log.visible_messages();
+    for (i, msg) in visible.iter().enumerate() {
+        execute!(stdout, MoveTo(0, stats_y + 3 + i as u16), Clear(ClearType::CurrentLine))?;
+
+        // Timestamp
+        if msg_log.show_timestamps {
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "{} ", msg.formatted_time())?;
+        }
+
+        // Category tag
+        if msg_log.show_categories {
+            execute!(stdout, SetForegroundColor(msg.category.label_color()))?;
+            write!(stdout, "{} ", msg.category.tag())?;
+        }
+
+        // Message text
+        execute!(stdout, SetForegroundColor(color_from_index(msg.color_index)))?;
+        // Truncate long messages
+        let max_len = if msg_log.show_timestamps && msg_log.show_categories { 85 }
+                      else if msg_log.show_timestamps || msg_log.show_categories { 90 }
+                      else { 100 };
+        let text = if msg.text.len() > max_len { format!("{}...", &msg.text[..max_len-3]) } else { msg.text.clone() };
+        write!(stdout, "{}", text)?;
+        execute!(stdout, ResetColor)?;
+    }
+
+    // Clear remaining lines
+    for i in visible.len()..6 {
+        execute!(stdout, MoveTo(0, stats_y + 3 + i as u16), Clear(ClearType::CurrentLine))?;
+    }
+
+    Ok(())
+}
+
 fn render_full(state: &GameState, movement: Option<&MovementState>, targeting: Option<&TargetingState>, msg_log: Option<&MessageLog>) -> std::io::Result<()> {
     let mut stdout = stdout();
     execute!(stdout, MoveTo(0, 0))?;
