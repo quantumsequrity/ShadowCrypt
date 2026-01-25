@@ -1,0 +1,13 @@
+[package]
+name = "shadowcrypt-core"
+description = "Core game logic for the ShadowCrypt roguelike"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rand.workspace = true
+serde.workspace = true
+bincode.workspace = true
+flate2.workspace = true

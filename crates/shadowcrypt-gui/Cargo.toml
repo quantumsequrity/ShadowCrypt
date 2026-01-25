@@ -1,0 +1,17 @@
+[package]
+name = "shadowcrypt-gui"
+description = "GUI roguelike dungeon crawler using egui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "shadowcrypt-gui"
+path = "src/main.rs"
+
+[dependencies]
+shadowcrypt-core.workspace = true
+egui.workspace = true
+eframe.workspace = true
+rand.workspace = true

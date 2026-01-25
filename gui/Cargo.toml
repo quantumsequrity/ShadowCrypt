@@ -1,0 +1,15 @@
+[package]
+name = "shadowcrypt-gui"
+version = "0.1.0"
+edition = "2021"
+description = "GUI frontend for ShadowCrypt roguelike"
+authors = ["bloodraven"]
+
+[[bin]]
+name = "shadowcrypt-gui"
+path = "src/main.rs"
+
+[dependencies]
+shadowcrypt-core = { path = "../core" }
+egui = "0.31"
+eframe = "0.31"

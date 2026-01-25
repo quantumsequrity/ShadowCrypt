@@ -1,0 +1,16 @@
+[package]
+name = "shadowcrypt-cli"
+description = "Terminal-based roguelike dungeon crawler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "shadowcrypt"
+path = "src/main.rs"
+
+[dependencies]
+shadowcrypt-core.workspace = true
+crossterm.workspace = true
+rand.workspace = true

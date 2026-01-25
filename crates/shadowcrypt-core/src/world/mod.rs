@@ -1,0 +1,550 @@
+//! World generation and map system for the ShadowCrypt roguelike
+//!
+//! This module handles dungeon generation, tile types, room creation,
+//! and map visibility.
+
+use serde::{Serialize, Deserialize};
+use rand::prelude::*;
+use crate::constants::{MAP_WIDTH, MAP_HEIGHT, MAX_ROOMS, MIN_ROOM_SIZE, MAX_ROOM_SIZE, BOSS_LEVELS};
+
+/// Tile types in the game
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum Tile {
+    Wall,
+    Floor,
+    StairsDown,
+    StairsUp,
+    Door,
+    OpenDoor,
+    Trap,
+    DisarmedTrap,
+    Water,
+    Lava,
+    Chest,
+    OpenChest,
+    Shrine,
+    UsedShrine,
+    Pillar,
+    Grass,
+    Ice,
+    Sand,
+    BossGate,
+}
+
+impl Tile {
+    /// Returns the display glyph for the tile
+    pub fn glyph(&self) -> char {
+        match self {
+            Self::Wall => '#',
+            Self::Floor => '.',
+            Self::StairsDown => '>',
+            Self::StairsUp => '<',
+            Self::Door => '+',
+            Self::OpenDoor => '\'',
+            Self::Trap => '^',
+            Self::DisarmedTrap => '_',
+            Self::Water => '~',
+            Self::Lava => '~',
+            Self::Chest => '=',
+            Self::OpenChest => '-',
+            Self::Shrine => '&',
+            Self::UsedShrine => '.',
+            Self::Pillar => 'O',
+            Self::Grass => '"',
+            Self::Ice => '.',
+            Self::Sand => '.',
+            Self::BossGate => '8',
+        }
+    }
+
+    /// Returns whether this tile can be walked on
+    pub fn walkable(&self) -> bool {
+        matches!(
+            self,
+            Self::Floor
+                | Self::StairsDown
+                | Self::StairsUp
+                | Self::OpenDoor
+                | Self::Trap
+                | Self::DisarmedTrap
+                | Self::Water
+                | Self::Grass
+                | Self::Ice
+                | Self::Sand
+                | Self::UsedShrine
+                | Self::OpenChest
+                | Self::BossGate
+        )
+    }
+
+    /// Returns whether this tile blocks line of sight
+    pub fn blocks_sight(&self) -> bool {
+        matches!(self, Self::Wall | Self::Door | Self::Pillar)
+    }
+
+    /// Returns the display name of the tile
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Wall => "Wall",
+            Self::Floor => "Floor",
+            Self::StairsDown => "Stairs Down",
+            Self::StairsUp => "Stairs Up",
+            Self::Door => "Door",
+            Self::OpenDoor => "Open Door",
+            Self::Trap => "Trap",
+            Self::DisarmedTrap => "Disarmed Trap",
+            Self::Water => "Water",
+            Self::Lava => "Lava",
+            Self::Chest => "Chest",
+            Self::OpenChest => "Open Chest",
+            Self::Shrine => "Shrine",
+            Self::UsedShrine => "Used Shrine",
+            Self::Pillar => "Pillar",
+            Self::Grass => "Grass",
+            Self::Ice => "Ice",
+            Self::Sand => "Sand",
+            Self::BossGate => "Boss Gate",
+        }
+    }
+}
+
+/// Dungeon themes that determine visual style and enemy types
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum DungeonTheme {
+    Dungeon,
+    Cave,
+    Crypt,
+    Forest,
+    IceCavern,
+    VolcanicLair,
+    AncientRuins,
+    DemonRealm,
+}
+
+impl DungeonTheme {
+    /// Returns the appropriate theme for a given dungeon level
+    pub fn from_level(level: u32) -> Self {
+        match level {
+            1..=4 => Self::Dungeon,
+            5..=8 => Self::Cave,
+            9..=12 => Self::Crypt,
+            13..=16 => Self::Forest,
+            17..=20 => Self::IceCavern,
+            21..=24 => Self::VolcanicLair,
+            25..=28 => Self::AncientRuins,
+            _ => Self::DemonRealm,
+        }
+    }
+
+    /// Returns the default floor tile for this theme
+    pub fn floor_tile(&self) -> Tile {
+        match self {
+            Self::Dungeon | Self::Cave | Self::Crypt => Tile::Floor,
+            Self::Forest => Tile::Grass,
+            Self::IceCavern => Tile::Ice,
+            Self::AncientRuins => Tile::Sand,
+            Self::VolcanicLair | Self::DemonRealm => Tile::Floor,
+        }
+    }
+
+    /// Returns the display name of the theme
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Dungeon => "Dark Dungeon",
+            Self::Cave => "Twisted Caves",
+            Self::Crypt => "Haunted Crypt",
+            Self::Forest => "Cursed Forest",
+            Self::IceCavern => "Frozen Caverns",
+            Self::VolcanicLair => "Volcanic Depths",
+            Self::AncientRuins => "Ancient Ruins",
+            Self::DemonRealm => "Demon Realm",
+        }
+    }
+}
+
+/// Represents a room in the dungeon
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Room {
+    /// X coordinate of the room's top-left corner
+    pub x: usize,
+    /// Y coordinate of the room's top-left corner
+    pub y: usize,
+    /// Width of the room
+    pub width: usize,
+    /// Height of the room
+    pub height: usize,
+    /// Whether this room contains a boss
+    pub is_boss_room: bool,
+}
+
+impl Room {
+    /// Creates a new room
+    pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+            is_boss_room: false,
+        }
+    }
+
+    /// Returns the center coordinates of the room
+    pub fn center(&self) -> (usize, usize) {
+        (self.x + self.width / 2, self.y + self.height / 2)
+    }
+
+    /// Checks if this room intersects with another room (with 1-tile buffer)
+    pub fn intersects(&self, other: &Room) -> bool {
+        self.x <= other.x + other.width + 1
+            && self.x + self.width + 1 >= other.x
+            && self.y <= other.y + other.height + 1
+            && self.y + self.height + 1 >= other.y
+    }
+
+    /// Returns a random point inside the room
+    pub fn random_point(&self, rng: &mut impl Rng) -> (usize, usize) {
+        (
+            rng.gen_range(self.x + 1..self.x + self.width - 1),
+            rng.gen_range(self.y + 1..self.y + self.height - 1),
+        )
+    }
+}
+
+/// Represents the game map
+#[derive(Clone, Debug)]
+pub struct Map {
+    /// 2D grid of tiles
+    pub tiles: Vec<Vec<Tile>>,
+    /// Which tiles are currently visible
+    pub visible: Vec<Vec<bool>>,
+    /// Which tiles have been explored
+    pub explored: Vec<Vec<bool>>,
+    /// List of rooms in the dungeon
+    pub rooms: Vec<Room>,
+    /// Current dungeon theme
+    pub theme: DungeonTheme,
+}
+
+impl Map {
+    /// Creates a new empty map
+    pub fn new() -> Self {
+        Self {
+            tiles: vec![vec![Tile::Wall; MAP_WIDTH]; MAP_HEIGHT],
+            visible: vec![vec![false; MAP_WIDTH]; MAP_HEIGHT],
+            explored: vec![vec![false; MAP_WIDTH]; MAP_HEIGHT],
+            rooms: Vec::new(),
+            theme: DungeonTheme::Dungeon,
+        }
+    }
+
+    /// Generates a new dungeon for the given level
+    pub fn generate(&mut self, rng: &mut impl Rng, level: u32) {
+        self.theme = DungeonTheme::from_level(level);
+        let floor_tile = self.theme.floor_tile();
+
+        // Reset
+        self.tiles = vec![vec![Tile::Wall; MAP_WIDTH]; MAP_HEIGHT];
+        self.visible = vec![vec![false; MAP_WIDTH]; MAP_HEIGHT];
+        self.rooms.clear();
+
+        let is_boss_level = BOSS_LEVELS.contains(&level);
+
+        // Generate rooms
+        let target_rooms = if is_boss_level { MAX_ROOMS + 1 } else { MAX_ROOMS };
+
+        for _ in 0..target_rooms * 4 {
+            if self.rooms.len() >= target_rooms {
+                break;
+            }
+
+            let width = rng.gen_range(MIN_ROOM_SIZE..=MAX_ROOM_SIZE);
+            let height = rng.gen_range(MIN_ROOM_SIZE..=MAX_ROOM_SIZE);
+            let x = rng.gen_range(1..MAP_WIDTH - width - 1);
+            let y = rng.gen_range(1..MAP_HEIGHT - height - 1);
+
+            let new_room = Room::new(x, y, width, height);
+
+            let overlaps = self.rooms.iter().any(|r| new_room.intersects(r));
+            if !overlaps {
+                self.carve_room(&new_room, floor_tile);
+
+                if !self.rooms.is_empty() {
+                    let (new_x, new_y) = new_room.center();
+                    let (prev_x, prev_y) = self.rooms.last().unwrap().center();
+
+                    if rng.gen_bool(0.5) {
+                        self.carve_h_tunnel(prev_x, new_x, prev_y, floor_tile);
+                        self.carve_v_tunnel(prev_y, new_y, new_x, floor_tile);
+                    } else {
+                        self.carve_v_tunnel(prev_y, new_y, prev_x, floor_tile);
+                        self.carve_h_tunnel(prev_x, new_x, new_y, floor_tile);
+                    }
+
+                    // Add doors at tunnel intersections
+                    if rng.gen_bool(0.3) {
+                        self.tiles[new_y][prev_x] = Tile::Door;
+                    }
+                }
+
+                self.rooms.push(new_room);
+            }
+        }
+
+        // Add special features
+        self.add_features(rng, level);
+
+        // Place stairs
+        if self.rooms.len() >= 2 {
+            let last_room = self.rooms.last().unwrap();
+            let (sx, sy) = last_room.center();
+
+            if is_boss_level {
+                self.tiles[sy][sx] = Tile::BossGate;
+            } else {
+                self.tiles[sy][sx] = Tile::StairsDown;
+            }
+
+            if level > 1 {
+                let first_room = &self.rooms[0];
+                let (ux, uy) = first_room.center();
+                self.tiles[uy][ux] = Tile::StairsUp;
+            }
+        }
+    }
+
+    /// Carves out a room in the map
+    fn carve_room(&mut self, room: &Room, floor_tile: Tile) {
+        for y in room.y..room.y + room.height {
+            for x in room.x..room.x + room.width {
+                self.tiles[y][x] = floor_tile;
+            }
+        }
+    }
+
+    /// Carves a horizontal tunnel
+    fn carve_h_tunnel(&mut self, x1: usize, x2: usize, y: usize, floor_tile: Tile) {
+        let (start, end) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
+        for x in start..=end {
+            if self.tiles[y][x] == Tile::Wall {
+                self.tiles[y][x] = floor_tile;
+            }
+        }
+    }
+
+    /// Carves a vertical tunnel
+    fn carve_v_tunnel(&mut self, y1: usize, y2: usize, x: usize, floor_tile: Tile) {
+        let (start, end) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
+        for y in start..=end {
+            if self.tiles[y][x] == Tile::Wall {
+                self.tiles[y][x] = floor_tile;
+            }
+        }
+    }
+
+    /// Adds special features to the map (traps, chests, water, etc.)
+    fn add_features(&mut self, rng: &mut impl Rng, level: u32) {
+        // Add traps
+        for room in &self.rooms[1..] {
+            if rng.gen_bool(0.2) {
+                let (x, y) = room.random_point(rng);
+                if self.tiles[y][x].walkable() && self.tiles[y][x] != Tile::StairsDown {
+                    self.tiles[y][x] = Tile::Trap;
+                }
+            }
+        }
+
+        // Add chests
+        for room in &self.rooms[1..] {
+            if rng.gen_bool(0.15) {
+                let (x, y) = room.random_point(rng);
+                if self.tiles[y][x].walkable() {
+                    self.tiles[y][x] = Tile::Chest;
+                }
+            }
+        }
+
+        // Add shrines
+        if rng.gen_bool(0.1 + level as f64 * 0.01) {
+            if let Some(room) = self.rooms.get(rng.gen_range(1..self.rooms.len())) {
+                let (x, y) = room.center();
+                if self.tiles[y][x].walkable() {
+                    self.tiles[y][x] = Tile::Shrine;
+                }
+            }
+        }
+
+        // Add water/lava pools based on theme
+        match self.theme {
+            DungeonTheme::Cave | DungeonTheme::Dungeon => {
+                for room in self.rooms.clone() {
+                    if rng.gen_bool(0.1) {
+                        let (x, y) = room.random_point(rng);
+                        for dy in 0..3 {
+                            for dx in 0..3 {
+                                let nx = x + dx;
+                                let ny = y + dy;
+                                if nx < MAP_WIDTH && ny < MAP_HEIGHT && self.tiles[ny][nx].walkable() {
+                                    self.tiles[ny][nx] = Tile::Water;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            DungeonTheme::VolcanicLair | DungeonTheme::DemonRealm => {
+                for room in self.rooms.clone() {
+                    if rng.gen_bool(0.15) {
+                        let (x, y) = room.random_point(rng);
+                        for dy in 0..2 {
+                            for dx in 0..2 {
+                                let nx = x + dx;
+                                let ny = y + dy;
+                                if nx < MAP_WIDTH && ny < MAP_HEIGHT && self.tiles[ny][nx].walkable() {
+                                    self.tiles[ny][nx] = Tile::Lava;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Add pillars
+        for room in self.rooms.clone() {
+            if room.width > 8 && room.height > 8 && rng.gen_bool(0.3) {
+                let cx = room.x + room.width / 2;
+                let cy = room.y + room.height / 2;
+                for &(dx, dy) in &[(-2i32, -2i32), (2, -2), (-2, 2), (2, 2)] {
+                    let px = (cx as i32 + dx) as usize;
+                    let py = (cy as i32 + dy) as usize;
+                    if self.tiles[py][px].walkable() {
+                        self.tiles[py][px] = Tile::Pillar;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Computes field of view from the given position
+    pub fn compute_fov(&mut self, px: usize, py: usize) {
+        for row in &mut self.visible {
+            for cell in row {
+                *cell = false;
+            }
+        }
+
+        for angle in 0..360 {
+            let rad = (angle as f32) * std::f32::consts::PI / 180.0;
+            let dx = rad.cos();
+            let dy = rad.sin();
+
+            let mut x = px as f32 + 0.5;
+            let mut y = py as f32 + 0.5;
+
+            for _ in 0..crate::constants::VIEW_RADIUS {
+                let ix = x as usize;
+                let iy = y as usize;
+
+                if ix >= MAP_WIDTH || iy >= MAP_HEIGHT {
+                    break;
+                }
+
+                self.visible[iy][ix] = true;
+                self.explored[iy][ix] = true;
+
+                if self.tiles[iy][ix].blocks_sight() {
+                    break;
+                }
+
+                x += dx;
+                y += dy;
+            }
+        }
+    }
+
+    /// Checks if a position is walkable
+    pub fn is_walkable(&self, x: usize, y: usize) -> bool {
+        if x >= MAP_WIDTH || y >= MAP_HEIGHT {
+            return false;
+        }
+        self.tiles[y][x].walkable()
+    }
+
+    /// Reveals the entire map (for debugging or scroll of mapping)
+    pub fn reveal_all(&mut self) {
+        for y in 0..MAP_HEIGHT {
+            for x in 0..MAP_WIDTH {
+                self.explored[y][x] = true;
+            }
+        }
+    }
+
+    /// Returns the tile at the given position
+    pub fn get_tile(&self, x: usize, y: usize) -> Option<Tile> {
+        if x < MAP_WIDTH && y < MAP_HEIGHT {
+            Some(self.tiles[y][x])
+        } else {
+            None
+        }
+    }
+
+    /// Sets the tile at the given position
+    pub fn set_tile(&mut self, x: usize, y: usize, tile: Tile) {
+        if x < MAP_WIDTH && y < MAP_HEIGHT {
+            self.tiles[y][x] = tile;
+        }
+    }
+}
+
+impl Default for Map {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tile_walkability() {
+        assert!(Tile::Floor.walkable());
+        assert!(!Tile::Wall.walkable());
+        assert!(Tile::StairsDown.walkable());
+    }
+
+    #[test]
+    fn test_room_center() {
+        let room = Room::new(10, 10, 6, 6);
+        assert_eq!(room.center(), (13, 13));
+    }
+
+    #[test]
+    fn test_room_intersection() {
+        let room1 = Room::new(0, 0, 5, 5);
+        let room2 = Room::new(4, 4, 5, 5);
+        let room3 = Room::new(20, 20, 5, 5);
+
+        assert!(room1.intersects(&room2));
+        assert!(!room1.intersects(&room3));
+    }
+
+    #[test]
+    fn test_map_generation() {
+        let mut rng = rand::thread_rng();
+        let mut map = Map::new();
+        map.generate(&mut rng, 1);
+
+        assert!(!map.rooms.is_empty());
+        assert_eq!(map.theme, DungeonTheme::Dungeon);
+    }
+
+    #[test]
+    fn test_theme_from_level() {
+        assert_eq!(DungeonTheme::from_level(1), DungeonTheme::Dungeon);
+        assert_eq!(DungeonTheme::from_level(10), DungeonTheme::Crypt);
+        assert_eq!(DungeonTheme::from_level(30), DungeonTheme::DemonRealm);
+    }
+}
