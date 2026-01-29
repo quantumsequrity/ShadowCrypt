@@ -107,9 +107,16 @@ impl GameState {
 
     /// Spawn enemies on the current level
     pub fn spawn_enemies(&mut self) {
+        use crate::entities::{EntityBehavior, MovementPattern};
+
         self.enemies.clear();
 
         let is_boss_level = BOSS_LEVELS.contains(&self.dungeon_level);
+
+        // Collect room centers for patrol routes
+        let room_centers: Vec<(usize, usize)> = self.map.rooms.iter()
+            .map(|r| r.center())
+            .collect();
 
         for (i, room) in self.map.rooms.iter().enumerate() {
             if i == 0 {
@@ -120,7 +127,12 @@ impl GameState {
             if is_boss_level && i == self.map.rooms.len() - 1 && !self.boss_defeated {
                 if let Some(boss_kind) = EnemyKind::boss_for_level(self.dungeon_level) {
                     let (bx, by) = room.center();
-                    self.enemies.push(Enemy::new(bx, by, boss_kind, self.dungeon_level));
+                    let mut boss = Enemy::new_in_room(bx, by, boss_kind, self.dungeon_level, i);
+                    // Bosses guard their room
+                    boss.ai.behavior = EntityBehavior::Guard;
+                    boss.ai.aggro_range = 20;
+                    boss.ai.vision_range = 25;
+                    self.enemies.push(boss);
                     continue;
                 }
             }
@@ -131,7 +143,73 @@ impl GameState {
             for _ in 0..num_enemies {
                 let (x, y) = room.random_point(&mut self.rng);
                 let kind = EnemyKind::for_level(self.dungeon_level, &mut self.rng);
-                self.enemies.push(Enemy::new(x, y, kind, self.dungeon_level));
+                let mut enemy = Enemy::new_in_room(x, y, kind, self.dungeon_level, i);
+
+                // Set up AI based on enemy type
+                self.setup_enemy_ai(&mut enemy, i, &room_centers);
+
+                self.enemies.push(enemy);
+            }
+        }
+    }
+
+    /// Set up AI behavior for a newly spawned enemy
+    fn setup_enemy_ai(&mut self, enemy: &mut Enemy, room_idx: usize, room_centers: &[(usize, usize)]) {
+        use crate::entities::{EntityBehavior, MovementPattern};
+
+        // Territorial creatures get territory behavior
+        if enemy.kind.is_territorial() {
+            enemy.ai.behavior = EntityBehavior::Territorial;
+            enemy.ai.movement = MovementPattern::new_territory(enemy.x, enemy.y, 10);
+            return;
+        }
+
+        // Predators hunt
+        if enemy.kind.is_predator() {
+            enemy.ai.behavior = EntityBehavior::Hunt;
+            enemy.ai.aggro_range = 12;
+            return;
+        }
+
+        // Some enemies patrol between rooms
+        let patrol_chance = match enemy.kind {
+            EnemyKind::Skeleton | EnemyKind::Zombie | EnemyKind::Ghost
+            | EnemyKind::Goblin | EnemyKind::Hobgoblin => 0.6,
+            _ => 0.3,
+        };
+
+        if self.rng.gen_bool(patrol_chance) && room_centers.len() > 2 {
+            // Create patrol route
+            let mut waypoints = Vec::new();
+            waypoints.push((enemy.x, enemy.y));
+
+            // Add 2-4 nearby room centers to patrol
+            let num_waypoints = self.rng.gen_range(2..=4.min(room_centers.len()));
+            let mut available_rooms: Vec<usize> = (0..room_centers.len())
+                .filter(|&idx| idx != room_idx)
+                .collect();
+            available_rooms.shuffle(&mut self.rng);
+
+            for &idx in available_rooms.iter().take(num_waypoints) {
+                waypoints.push(room_centers[idx]);
+            }
+
+            enemy.ai.behavior = EntityBehavior::Patrol;
+            enemy.ai.movement = MovementPattern::new_patrol(waypoints);
+        } else {
+            // Default to wandering within the room area
+            enemy.ai.behavior = EntityBehavior::Wander;
+            enemy.ai.movement = MovementPattern::Random { radius: 8 };
+        }
+
+        // Some enemies sleep (nocturnal)
+        if self.rng.gen_bool(0.15) {
+            match enemy.kind {
+                EnemyKind::Bat | EnemyKind::Ghost | EnemyKind::Vampire
+                | EnemyKind::Wraith | EnemyKind::Banshee => {
+                    enemy.ai.behavior = EntityBehavior::Sleep;
+                }
+                _ => {}
             }
         }
     }
@@ -934,15 +1012,20 @@ impl GameState {
         );
     }
 
-    /// Process enemy turns
+    /// Process all entity turns - autonomous world simulation
     fn enemy_turn(&mut self) {
-        let mut attacks: Vec<(usize, i32, Option<StatusEffect>)> = Vec::new();
-        let mut moves: Vec<(usize, usize, usize)> = Vec::new();
+        self.process_autonomous_world();
+    }
+
+    /// Process the autonomous world where all entities act independently
+    fn process_autonomous_world(&mut self) {
+        use crate::entities::{EntityAction, EntityBehavior, EntityFaction, EntityDisposition, MovementPattern};
 
         let player_invisible = self.player.has_status(StatusEffect::Invisibility);
-        let enemy_positions: Vec<(usize, usize)> = self.enemies.iter().map(|e| (e.x, e.y)).collect();
+        let player_pos = (self.player.x, self.player.y);
 
-        for (idx, enemy) in self.enemies.iter_mut().enumerate() {
+        // Phase 1: Update all enemy AI states
+        for enemy in &mut self.enemies {
             if !enemy.is_alive() {
                 continue;
             }
@@ -951,80 +1034,133 @@ impl GameState {
             let damage_events = enemy.tick_status_effects();
             for (_effect, dmg) in damage_events {
                 enemy.hp -= dmg;
-                if !enemy.is_alive() {
-                    continue;
-                }
             }
 
+            // Determine if enemy can see player
+            let can_see_player = self.map.visible[enemy.y][enemy.x] && !player_invisible;
+
+            // Update AI state
+            enemy.update_ai(can_see_player, Some(player_pos));
+            enemy.acted_this_turn = false;
+        }
+
+        // Phase 2: Enemy vs Enemy combat (territorial disputes, predator/prey)
+        self.process_enemy_interactions();
+
+        // Phase 3: Process each enemy's autonomous action
+        let mut player_attacks: Vec<(usize, i32, Option<StatusEffect>)> = Vec::new();
+        let mut enemy_moves: Vec<(usize, usize, usize)> = Vec::new();
+
+        // Get positions snapshot to avoid borrow issues
+        let enemy_positions: Vec<(u64, usize, usize)> = self.enemies.iter()
+            .filter(|e| e.is_alive())
+            .map(|e| (e.id, e.x, e.y))
+            .collect();
+
+        for (idx, enemy) in self.enemies.iter_mut().enumerate() {
+            if !enemy.is_alive() || enemy.acted_this_turn {
+                continue;
+            }
+
+            // Check if stunned or frozen
             if enemy.has_status(StatusEffect::Stun) || enemy.has_status(StatusEffect::Freeze) {
                 continue;
             }
 
-            let can_see_player = self.map.visible[enemy.y][enemy.x] && !player_invisible;
+            // Get the enemy's decision
+            let action = enemy.decide_action(&[], player_pos, &self.map.visible);
 
-            if can_see_player {
-                enemy.last_seen_player = Some((self.player.x, self.player.y));
-            }
+            match action {
+                EntityAction::Attack(tx, ty) => {
+                    // Check if attacking player
+                    if tx == self.player.x && ty == self.player.y {
+                        let mut damage = (enemy.attack - self.player.total_defense()).max(1);
 
-            let target = if can_see_player {
-                Some((self.player.x, self.player.y))
-            } else {
-                enemy.last_seen_player
-            };
+                        // Boss attacks hit harder
+                        if enemy.kind.is_boss() {
+                            damage = (damage as f32 * 1.5) as i32;
+                        }
 
-            if let Some((tx, ty)) = target {
-                let dx = tx as i32 - enemy.x as i32;
-                let dy = ty as i32 - enemy.y as i32;
-                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                        let status = if enemy.kind.can_poison() && self.rng.gen_bool(0.3) {
+                            Some(StatusEffect::Poison)
+                        } else if enemy.kind.can_burn() && self.rng.gen_bool(0.3) {
+                            Some(StatusEffect::Burn)
+                        } else if enemy.kind.can_freeze() && self.rng.gen_bool(0.2) {
+                            Some(StatusEffect::Freeze)
+                        } else if enemy.kind.can_bleed() && self.rng.gen_bool(0.25) {
+                            Some(StatusEffect::Bleed)
+                        } else {
+                            None
+                        };
 
-                if dist < 1.5 && can_see_player {
-                    // Attack
-                    let mut damage = (enemy.attack - self.player.total_defense()).max(1);
-
-                    // Boss attacks hit harder
-                    if enemy.kind.is_boss() {
-                        damage = (damage as f32 * 1.5) as i32;
+                        player_attacks.push((idx, damage, status));
                     }
+                    // Note: Enemy vs enemy attacks are handled in process_enemy_interactions
+                }
 
-                    let status = if enemy.kind.can_poison() && self.rng.gen_bool(0.3) {
-                        Some(StatusEffect::Poison)
-                    } else if enemy.kind.can_burn() && self.rng.gen_bool(0.3) {
-                        Some(StatusEffect::Burn)
-                    } else if enemy.kind.can_freeze() && self.rng.gen_bool(0.2) {
-                        Some(StatusEffect::Freeze)
-                    } else if enemy.kind.can_bleed() && self.rng.gen_bool(0.25) {
-                        Some(StatusEffect::Bleed)
-                    } else {
-                        None
-                    };
+                EntityAction::Move(dx, dy) => {
+                    let new_x = (enemy.x as i32 + dx).max(0) as usize;
+                    let new_y = (enemy.y as i32 + dy).max(0) as usize;
 
-                    attacks.push((idx, damage, status));
-                } else if dist < 15.0 {
-                    // Move towards target
-                    let move_x = dx.signum();
-                    let move_y = dy.signum();
-                    let new_x = (enemy.x as i32 + move_x).max(0) as usize;
-                    let new_y = (enemy.y as i32 + move_y).max(0) as usize;
-
-                    let blocked = enemy_positions.iter().any(|&(ex, ey)| ex == new_x && ey == new_y)
+                    // Check for collision with other enemies
+                    let blocked = enemy_positions.iter()
+                        .any(|(id, ex, ey)| *id != enemy.id && *ex == new_x && *ey == new_y)
                         || (new_x == self.player.x && new_y == self.player.y);
 
                     if self.map.is_walkable(new_x, new_y) && !blocked {
-                        moves.push((idx, new_x, new_y));
+                        enemy_moves.push((idx, new_x, new_y));
                     }
                 }
+
+                EntityAction::PatrolNext => {
+                    enemy.advance_patrol();
+                }
+
+                EntityAction::Flee => {
+                    // Move away from player
+                    let dx = (enemy.x as i32 - player_pos.0 as i32).signum();
+                    let dy = (enemy.y as i32 - player_pos.1 as i32).signum();
+                    let new_x = (enemy.x as i32 + dx).max(0) as usize;
+                    let new_y = (enemy.y as i32 + dy).max(0) as usize;
+
+                    let blocked = enemy_positions.iter()
+                        .any(|(id, ex, ey)| *id != enemy.id && *ex == new_x && *ey == new_y)
+                        || (new_x == self.player.x && new_y == self.player.y);
+
+                    if self.map.is_walkable(new_x, new_y) && !blocked {
+                        enemy_moves.push((idx, new_x, new_y));
+                    }
+                }
+
+                EntityAction::Rest => {
+                    // Enemy rests and heals slightly
+                    if enemy.hp < enemy.max_hp {
+                        enemy.hp = (enemy.hp + 1).min(enemy.max_hp);
+                    }
+                }
+
+                EntityAction::MakeNoise(radius) => {
+                    // Alert nearby entities
+                    self.propagate_sound(enemy.x, enemy.y, radius as usize);
+                }
+
+                _ => {} // Wait or other actions
+            }
+
+            enemy.acted_this_turn = true;
+        }
+
+        // Apply enemy moves
+        for (idx, new_x, new_y) in enemy_moves {
+            if idx < self.enemies.len() {
+                self.enemies[idx].x = new_x;
+                self.enemies[idx].y = new_y;
             }
         }
 
-        // Apply moves
-        for (idx, new_x, new_y) in moves {
-            self.enemies[idx].x = new_x;
-            self.enemies[idx].y = new_y;
-        }
-
-        // Apply attacks
-        for (idx, damage, status) in attacks {
-            if !self.enemies[idx].is_alive() {
+        // Apply player attacks
+        for (idx, damage, status) in player_attacks {
+            if idx >= self.enemies.len() || !self.enemies[idx].is_alive() {
                 continue;
             }
 
@@ -1047,6 +1183,536 @@ impl GameState {
 
         // Remove dead enemies
         self.enemies.retain(|e| e.is_alive());
+    }
+
+    /// Process enemy vs enemy interactions (territorial combat, predation)
+    fn process_enemy_interactions(&mut self) {
+        use crate::entities::{EntityFaction, EntityDisposition, EntityBehavior};
+
+        let mut combat_pairs: Vec<(usize, usize, i32)> = Vec::new(); // attacker_idx, defender_idx, damage
+        let mut combat_messages: Vec<String> = Vec::new();
+
+        // Find potential combat pairs
+        for i in 0..self.enemies.len() {
+            if !self.enemies[i].is_alive() {
+                continue;
+            }
+
+            let attacker_faction = self.enemies[i].kind.faction();
+            let attacker_territorial = self.enemies[i].kind.is_territorial();
+            let attacker_predator = self.enemies[i].kind.is_predator();
+
+            for j in 0..self.enemies.len() {
+                if i == j || !self.enemies[j].is_alive() {
+                    continue;
+                }
+
+                let defender_faction = self.enemies[j].kind.faction();
+                let disposition = attacker_faction.disposition_towards(&defender_faction);
+
+                // Check if they're adjacent
+                let dx = (self.enemies[i].x as i32 - self.enemies[j].x as i32).abs();
+                let dy = (self.enemies[i].y as i32 - self.enemies[j].y as i32).abs();
+
+                if dx > 1 || dy > 1 {
+                    continue;
+                }
+
+                // Determine if combat should occur
+                let should_fight = match disposition {
+                    EntityDisposition::Hostile => true,
+                    EntityDisposition::Neutral => {
+                        // Territorial creatures attack intruders
+                        if attacker_territorial {
+                            // Random chance to attack neutral creatures in territory
+                            self.rng.gen_bool(0.3)
+                        } else {
+                            false
+                        }
+                    }
+                    EntityDisposition::Fearful => false,
+                    _ => false,
+                };
+
+                // Check predator/prey relationship
+                let is_prey = if attacker_predator {
+                    self.enemies[i].kind.prey_factions().contains(&defender_faction)
+                } else {
+                    false
+                };
+
+                if should_fight || is_prey {
+                    // Calculate damage
+                    let damage = (self.enemies[i].attack - self.enemies[j].defense).max(1);
+                    combat_pairs.push((i, j, damage));
+                }
+            }
+        }
+
+        // Apply combat (limit to prevent infinite loops)
+        for (attacker_idx, defender_idx, damage) in combat_pairs.into_iter().take(5) {
+            if attacker_idx >= self.enemies.len() || defender_idx >= self.enemies.len() {
+                continue;
+            }
+
+            if !self.enemies[attacker_idx].is_alive() || !self.enemies[defender_idx].is_alive() {
+                continue;
+            }
+
+            self.enemies[defender_idx].hp -= damage;
+
+            let attacker_name = self.enemies[attacker_idx].kind.name();
+            let defender_name = self.enemies[defender_idx].kind.name();
+
+            // Only show message if in player's view
+            if self.map.visible[self.enemies[attacker_idx].y][self.enemies[attacker_idx].x] {
+                self.add_message(
+                    format!("{} attacks {} for {} damage!", attacker_name, defender_name, damage),
+                    6 // Orange color for enemy combat
+                );
+            }
+
+            // Check if defender died
+            if !self.enemies[defender_idx].is_alive() {
+                if self.map.visible[self.enemies[defender_idx].y][self.enemies[defender_idx].x] {
+                    self.add_message(
+                        format!("{} was slain by {}!", defender_name, attacker_name),
+                        4 // Red for death
+                    );
+                }
+            }
+        }
+    }
+
+    /// Propagate sound to alert nearby enemies
+    fn propagate_sound(&mut self, x: usize, y: usize, radius: usize) {
+        use crate::entities::EntityBehavior;
+
+        for enemy in &mut self.enemies {
+            if !enemy.is_alive() {
+                continue;
+            }
+
+            let dx = (enemy.x as i32 - x as i32).abs() as usize;
+            let dy = (enemy.y as i32 - y as i32).abs() as usize;
+            let dist = ((dx * dx + dy * dy) as f32).sqrt() as usize;
+
+            if dist <= radius {
+                // Add interest point for investigation
+                let priority = ((radius - dist) * 10) as u32;
+                enemy.ai.add_interest(x, y, priority);
+
+                // Wake sleeping enemies
+                if enemy.ai.behavior == EntityBehavior::Sleep && dist <= radius / 2 {
+                    enemy.ai.behavior = EntityBehavior::Investigate;
+                }
+            }
+        }
+    }
+
+    /// Simulate world time passing (called even when player doesn't act)
+    pub fn simulate_world_tick(&mut self) {
+        use crate::entities::EntityBehavior;
+        use crate::npcs::{NPCAction, NPCBehavior};
+
+        // Update all enemy AIs
+        let player_invisible = self.player.has_status(StatusEffect::Invisibility);
+        let player_pos = (self.player.x, self.player.y);
+
+        for enemy in &mut self.enemies {
+            if !enemy.is_alive() {
+                continue;
+            }
+
+            let can_see_player = self.map.visible[enemy.y][enemy.x] && !player_invisible;
+            enemy.update_ai(can_see_player, Some(player_pos));
+
+            // Decay behavior timer for idle returns
+            if enemy.ai.behavior_timer > 20 {
+                match enemy.ai.behavior {
+                    EntityBehavior::Hunt => {
+                        if enemy.ai.turns_since_player > 15 {
+                            enemy.ai.behavior = EntityBehavior::Patrol;
+                            enemy.ai.behavior_timer = 0;
+                        }
+                    }
+                    EntityBehavior::Investigate => {
+                        if enemy.ai.interest_points.is_empty() {
+                            enemy.ai.behavior = EntityBehavior::Wander;
+                            enemy.ai.behavior_timer = 0;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Process enemy movements (wandering, patrolling)
+        self.process_idle_movements();
+
+        // Process NPC autonomous behavior
+        self.process_npc_behavior();
+
+        // Process companion autonomous actions
+        self.process_companion_behavior();
+    }
+
+    /// Process NPC autonomous behavior
+    fn process_npc_behavior(&mut self) {
+        use crate::npcs::{NPCAction, NPCBehavior};
+
+        // Get enemy positions to check for danger
+        let enemy_positions: Vec<(usize, usize)> = self.enemies.iter()
+            .filter(|e| e.is_alive())
+            .map(|e| (e.x, e.y))
+            .collect();
+
+        // Get NPC positions for collision detection
+        let npc_positions: Vec<(u32, usize, usize)> = self.npc_manager.npcs.iter()
+            .map(|n| (n.id, n.x, n.y))
+            .collect();
+
+        // Update each NPC
+        for npc in &mut self.npc_manager.npcs {
+            // Update NPC state
+            npc.update(&mut self.rng, self.dungeon_level);
+
+            // Check for danger
+            npc.check_danger(&enemy_positions);
+
+            // Decide action
+            let action = npc.decide_action(&mut self.rng);
+
+            match action {
+                NPCAction::Move(dx, dy) => {
+                    let new_x = (npc.x as i32 + dx).max(0) as usize;
+                    let new_y = (npc.y as i32 + dy).max(0) as usize;
+
+                    // Check collisions
+                    let blocked_by_npc = npc_positions.iter()
+                        .any(|(id, x, y)| *id != npc.id && *x == new_x && *y == new_y);
+                    let blocked_by_enemy = enemy_positions.iter()
+                        .any(|(x, y)| *x == new_x && *y == new_y);
+                    let blocked_by_player = new_x == self.player.x && new_y == self.player.y;
+
+                    // Check if within wander radius
+                    let within_radius = {
+                        let dx = (new_x as i32 - npc.schedule.home_pos.0 as i32).abs() as usize;
+                        let dy = (new_y as i32 - npc.schedule.home_pos.1 as i32).abs() as usize;
+                        dx <= npc.schedule.wander_radius && dy <= npc.schedule.wander_radius
+                    };
+
+                    if self.map.is_walkable(new_x, new_y)
+                        && !blocked_by_npc
+                        && !blocked_by_enemy
+                        && !blocked_by_player
+                        && (within_radius || npc.behavior == NPCBehavior::Fleeing)
+                    {
+                        npc.x = new_x;
+                        npc.y = new_y;
+                    }
+                }
+
+                NPCAction::Talk => {
+                    // Generate ambient dialogue if player is nearby and can see
+                    if self.map.visible[npc.y][npc.x] {
+                        if let Some(line) = npc.get_ambient_line(&mut self.rng) {
+                            let name = npc.display_name();
+                            self.add_message(format!("{}: \"{}\"", name, line), 9);
+                        }
+                    }
+                }
+
+                _ => {} // Wait, Rest, etc.
+            }
+
+            // Check for NPC-NPC interactions (socializing)
+            if npc.behavior != NPCBehavior::Socializing && npc.action_cooldown == 0 {
+                for (other_id, ox, oy) in &npc_positions {
+                    if *other_id == npc.id {
+                        continue;
+                    }
+
+                    let dx = (npc.x as i32 - *ox as i32).abs();
+                    let dy = (npc.y as i32 - *oy as i32).abs();
+
+                    // Adjacent NPCs may start conversations
+                    if dx <= 2 && dy <= 2 && self.rng.gen_bool(0.02) {
+                        npc.try_socialize(*other_id);
+                        break;
+                    }
+                }
+            }
+
+            // Wandering NPCs return to stationary after a while
+            if npc.behavior == NPCBehavior::Fleeing {
+                let dx = (npc.x as i32 - npc.schedule.home_pos.0 as i32).abs();
+                let dy = (npc.y as i32 - npc.schedule.home_pos.1 as i32).abs();
+                if dx <= 2 && dy <= 2 {
+                    npc.behavior = NPCBehavior::Wandering;
+                }
+            }
+        }
+    }
+
+    /// Process companion autonomous behavior
+    fn process_companion_behavior(&mut self) {
+        use crate::companions::{CompanionAction, CompanionAI, CompanionBehavior};
+
+        let player_pos = (self.player.x, self.player.y);
+
+        // Process each companion
+        for companion in &mut self.player.companions {
+            if !companion.is_alive() {
+                continue;
+            }
+
+            // Tick companion status effects
+            let tick_damage = companion.tick();
+            if tick_damage > 0 {
+                // Show status damage if in view
+                if self.map.visible[companion.y][companion.x] {
+                    self.add_message(
+                        format!("{} takes {} status damage!", companion.name, tick_damage),
+                        3
+                    );
+                }
+            }
+
+            // Decide action based on AI
+            let action = CompanionAI::decide(companion, player_pos, &self.enemies, &self.map);
+
+            match action {
+                CompanionAction::Move(dx, dy) | CompanionAction::Follow => {
+                    let (dx, dy) = if let CompanionAction::Move(dx, dy) = action {
+                        (dx, dy)
+                    } else {
+                        // Follow - move towards player
+                        let dx = (player_pos.0 as i32 - companion.x as i32).signum();
+                        let dy = (player_pos.1 as i32 - companion.y as i32).signum();
+                        (dx, dy)
+                    };
+
+                    let new_x = (companion.x as i32 + dx).max(0) as usize;
+                    let new_y = (companion.y as i32 + dy).max(0) as usize;
+
+                    // Check collisions
+                    let blocked = self.enemies.iter()
+                        .any(|e| e.is_alive() && e.x == new_x && e.y == new_y)
+                        || (new_x == self.player.x && new_y == self.player.y)
+                        || self.player.companions.iter()
+                            .any(|c| c.x == new_x && c.y == new_y && c.name != companion.name);
+
+                    if self.map.is_walkable(new_x, new_y) && !blocked {
+                        companion.x = new_x;
+                        companion.y = new_y;
+                    }
+                }
+
+                CompanionAction::Attack(enemy_idx) => {
+                    if enemy_idx < self.enemies.len() && self.enemies[enemy_idx].is_alive() {
+                        let damage = (companion.attack - self.enemies[enemy_idx].defense).max(1);
+                        self.enemies[enemy_idx].hp -= damage;
+
+                        // Track damage and potentially kills
+                        companion.damage_dealt += damage as u32;
+
+                        if self.map.visible[companion.y][companion.x] {
+                            self.add_message(
+                                format!("{} attacks {} for {} damage!",
+                                    companion.name,
+                                    self.enemies[enemy_idx].kind.name(),
+                                    damage),
+                                5 // Green for ally attacks
+                            );
+                        }
+
+                        // Check if enemy died
+                        if !self.enemies[enemy_idx].is_alive() {
+                            companion.kills += 1;
+                            let xp = self.enemies[enemy_idx].xp_value;
+                            if companion.gain_xp(xp / 2) {
+                                if self.map.visible[companion.y][companion.x] {
+                                    self.add_message(
+                                        format!("{} leveled up to {}!", companion.name, companion.level),
+                                        11
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                CompanionAction::UseAbility(enemy_idx) => {
+                    if companion.can_use_ability() {
+                        let ability = companion.use_ability();
+                        let power = companion.ability_power();
+
+                        if self.map.visible[companion.y][companion.x] {
+                            self.add_message(
+                                format!("{} uses {}!", companion.name, ability.name()),
+                                13 // Magenta for abilities
+                            );
+                        }
+
+                        // Apply ability effects based on type
+                        match ability {
+                            crate::companions::CompanionAbility::NatureHeal => {
+                                self.player.hp = (self.player.hp + power).min(self.player.total_max_hp());
+                                self.add_message(format!("You are healed for {}!", power), 5);
+                            }
+                            crate::companions::CompanionAbility::FrostNova => {
+                                // Freeze nearby enemies
+                                for enemy in &mut self.enemies {
+                                    let dx = (enemy.x as i32 - companion.x as i32).abs();
+                                    let dy = (enemy.y as i32 - companion.y as i32).abs();
+                                    if dx <= 2 && dy <= 2 && enemy.is_alive() {
+                                        enemy.add_status(StatusEffect::Freeze, 2);
+                                    }
+                                }
+                            }
+                            crate::companions::CompanionAbility::FlameAura => {
+                                // Burn adjacent enemies
+                                for enemy in &mut self.enemies {
+                                    let dx = (enemy.x as i32 - companion.x as i32).abs();
+                                    let dy = (enemy.y as i32 - companion.y as i32).abs();
+                                    if dx <= 1 && dy <= 1 && enemy.is_alive() {
+                                        enemy.hp -= power / 2;
+                                        enemy.add_status(StatusEffect::Burn, 3);
+                                    }
+                                }
+                            }
+                            crate::companions::CompanionAbility::Terrify => {
+                                // Stun nearby enemies
+                                for enemy in &mut self.enemies {
+                                    let dx = (enemy.x as i32 - companion.x as i32).abs();
+                                    let dy = (enemy.y as i32 - companion.y as i32).abs();
+                                    if dx <= 3 && dy <= 3 && enemy.is_alive() {
+                                        enemy.add_status(StatusEffect::Stun, 2);
+                                    }
+                                }
+                            }
+                            _ => {
+                                // Default: damage to target
+                                if enemy_idx < self.enemies.len() && self.enemies[enemy_idx].is_alive() {
+                                    self.enemies[enemy_idx].hp -= power;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                CompanionAction::Heal => {
+                    if companion.can_use_ability() {
+                        let ability = companion.use_ability();
+                        let power = companion.ability_power();
+
+                        self.player.hp = (self.player.hp + power).min(self.player.total_max_hp());
+                        self.add_message(
+                            format!("{} heals you for {} HP!", companion.name, power),
+                            5
+                        );
+                    }
+                }
+
+                CompanionAction::Flee => {
+                    // Move away from nearest enemy
+                    if let Some(nearest) = self.enemies.iter()
+                        .filter(|e| e.is_alive())
+                        .min_by_key(|e| {
+                            let dx = e.x as i32 - companion.x as i32;
+                            let dy = e.y as i32 - companion.y as i32;
+                            dx * dx + dy * dy
+                        })
+                    {
+                        let dx = (companion.x as i32 - nearest.x as i32).signum();
+                        let dy = (companion.y as i32 - nearest.y as i32).signum();
+                        let new_x = (companion.x as i32 + dx).max(0) as usize;
+                        let new_y = (companion.y as i32 + dy).max(0) as usize;
+
+                        if self.map.is_walkable(new_x, new_y) {
+                            companion.x = new_x;
+                            companion.y = new_y;
+                        }
+                    }
+                }
+
+                CompanionAction::Wait => {} // Do nothing
+            }
+        }
+
+        // Remove dead enemies
+        self.enemies.retain(|e| e.is_alive());
+    }
+
+    /// Process idle enemy movements (wandering, patrolling)
+    fn process_idle_movements(&mut self) {
+        use crate::entities::{EntityBehavior, MovementPattern};
+
+        let enemy_positions: Vec<(u64, usize, usize)> = self.enemies.iter()
+            .filter(|e| e.is_alive())
+            .map(|e| (e.id, e.x, e.y))
+            .collect();
+
+        for enemy in &mut self.enemies {
+            if !enemy.is_alive() {
+                continue;
+            }
+
+            // Only process idle/patrol/wander behaviors
+            match enemy.ai.behavior {
+                EntityBehavior::Wander | EntityBehavior::Patrol | EntityBehavior::Idle => {}
+                _ => continue,
+            }
+
+            // 30% chance to move each tick for wanderers
+            if enemy.ai.behavior == EntityBehavior::Wander && self.rng.gen_bool(0.3) {
+                let dx = self.rng.gen_range(-1..=1);
+                let dy = self.rng.gen_range(-1..=1);
+
+                if dx != 0 || dy != 0 {
+                    let new_x = (enemy.x as i32 + dx).max(0) as usize;
+                    let new_y = (enemy.y as i32 + dy).max(0) as usize;
+
+                    let blocked = enemy_positions.iter()
+                        .any(|(id, ex, ey)| *id != enemy.id && *ex == new_x && *ey == new_y)
+                        || (new_x == self.player.x && new_y == self.player.y);
+
+                    if self.map.is_walkable(new_x, new_y) && !blocked {
+                        enemy.x = new_x;
+                        enemy.y = new_y;
+                    }
+                }
+            }
+
+            // Process patrol movements
+            if enemy.ai.behavior == EntityBehavior::Patrol {
+                if let MovementPattern::Patrol { waypoints, current_idx, .. } = &enemy.ai.movement {
+                    if !waypoints.is_empty() {
+                        let (tx, ty) = waypoints[*current_idx];
+                        let dx = (tx as i32 - enemy.x as i32).signum();
+                        let dy = (ty as i32 - enemy.y as i32).signum();
+
+                        if dx == 0 && dy == 0 {
+                            // Reached waypoint, advance
+                            enemy.advance_patrol();
+                        } else {
+                            let new_x = (enemy.x as i32 + dx).max(0) as usize;
+                            let new_y = (enemy.y as i32 + dy).max(0) as usize;
+
+                            let blocked = enemy_positions.iter()
+                                .any(|(id, ex, ey)| *id != enemy.id && *ex == new_x && *ey == new_y)
+                                || (new_x == self.player.x && new_y == self.player.y);
+
+                            if self.map.is_walkable(new_x, new_y) && !blocked {
+                                enemy.x = new_x;
+                                enemy.y = new_y;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Use the active skill

@@ -658,6 +658,69 @@ impl ShopItem {
     }
 }
 
+/// Actions NPCs can take autonomously
+#[derive(Clone, Debug)]
+pub enum NPCAction {
+    /// Move in a direction
+    Move(i32, i32),
+    /// Wait/idle
+    Wait,
+    /// Talk (ambient dialogue)
+    Talk,
+    /// Flee from danger
+    Flee,
+    /// Trade with another entity
+    Trade,
+    /// Rest
+    Rest,
+    /// Restock inventory
+    Restock,
+}
+
+/// NPC behavior for autonomous actions
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+pub enum NPCBehavior {
+    /// Standing still at current location
+    #[default]
+    Stationary,
+    /// Wandering around the area
+    Wandering,
+    /// Walking to a destination
+    Walking,
+    /// Resting/sleeping
+    Resting,
+    /// Currently talking to another NPC
+    Socializing,
+    /// Trading with another entity
+    Trading,
+    /// Fleeing from danger
+    Fleeing,
+}
+
+/// Activity schedule for NPCs
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct NPCSchedule {
+    /// Home position (where NPC returns to rest)
+    pub home_pos: (usize, usize),
+    /// Work position (where NPC conducts business)
+    pub work_pos: (usize, usize),
+    /// Wander radius from current position
+    pub wander_radius: usize,
+    /// Current activity time slot
+    pub current_slot: u8, // 0-23 for hour of day
+}
+
+impl Default for NPCSchedule {
+    fn default() -> Self {
+        Self {
+            home_pos: (0, 0),
+            work_pos: (0, 0),
+            wander_radius: 5,
+            current_slot: 12, // Noon
+        }
+    }
+}
+
 /// An NPC instance in the game world
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct NPC {
@@ -683,10 +746,24 @@ pub struct NPC {
     pub disposition: i32,
     /// Floor level where this NPC was spawned
     pub spawn_level: u32,
+    /// Current behavior state
+    pub behavior: NPCBehavior,
+    /// Schedule for daily activities
+    pub schedule: NPCSchedule,
+    /// Target position when walking
+    pub target_pos: Option<(usize, usize)>,
+    /// Current conversation partner (NPC ID)
+    pub conversation_partner: Option<NPCId>,
+    /// Turns until next restock (for merchants)
+    pub restock_timer: u32,
+    /// Action cooldown
+    pub action_cooldown: u32,
+    /// Turns since last player interaction
+    pub turns_since_player: u32,
 }
 
 impl NPC {
-    /// Create a new NPC
+    /// Create a new NPC with autonomous behavior
     pub fn new(id: NPCId, x: usize, y: usize, kind: NPCKind, dungeon_level: u32) -> Self {
         let dialogue = create_default_dialogue(kind);
         let shop_inventory = if kind.is_merchant() {
@@ -694,6 +771,30 @@ impl NPC {
         } else {
             Vec::new()
         };
+
+        // Determine initial behavior based on NPC type
+        let behavior = match kind {
+            NPCKind::Bard | NPCKind::Adventurer => NPCBehavior::Wandering,
+            NPCKind::Ghost | NPCKind::PrisonerSpirit => NPCBehavior::Wandering,
+            _ => NPCBehavior::Stationary,
+        };
+
+        // Set up schedule
+        let schedule = NPCSchedule {
+            home_pos: (x, y),
+            work_pos: (x, y),
+            wander_radius: match kind {
+                NPCKind::Bard => 15,
+                NPCKind::Adventurer => 12,
+                NPCKind::Ghost => 20,
+                NPCKind::MysteriousStranger => 10,
+                _ => 5,
+            },
+            current_slot: 12,
+        };
+
+        // Restock timer for merchants (100-200 turns)
+        let restock_timer = if kind.is_merchant() { 150 } else { 0 };
 
         Self {
             id,
@@ -707,6 +808,155 @@ impl NPC {
             has_met: false,
             disposition: 50, // Neutral
             spawn_level: dungeon_level,
+            behavior,
+            schedule,
+            target_pos: None,
+            conversation_partner: None,
+            restock_timer,
+            action_cooldown: 0,
+            turns_since_player: 0,
+        }
+    }
+
+    /// Update NPC autonomous behavior
+    pub fn update(&mut self, rng: &mut impl Rng, dungeon_level: u32) {
+        // Decrease cooldowns
+        if self.action_cooldown > 0 {
+            self.action_cooldown -= 1;
+        }
+        self.turns_since_player += 1;
+
+        // Handle restock timer for merchants
+        if self.kind.is_merchant() && self.restock_timer > 0 {
+            self.restock_timer -= 1;
+            if self.restock_timer == 0 {
+                self.restock(dungeon_level);
+                self.restock_timer = rng.gen_range(100..200);
+            }
+        }
+
+        // End conversations after some time
+        if self.behavior == NPCBehavior::Socializing {
+            if rng.gen_bool(0.1) {
+                self.behavior = NPCBehavior::Stationary;
+                self.conversation_partner = None;
+            }
+        }
+    }
+
+    /// Decide next action based on behavior
+    pub fn decide_action(&self, rng: &mut impl Rng) -> NPCAction {
+        match self.behavior {
+            NPCBehavior::Wandering => {
+                if rng.gen_bool(0.3) {
+                    // Random movement within wander radius
+                    let dx = rng.gen_range(-1..=1);
+                    let dy = rng.gen_range(-1..=1);
+                    NPCAction::Move(dx, dy)
+                } else {
+                    NPCAction::Wait
+                }
+            }
+            NPCBehavior::Walking => {
+                if let Some((tx, ty)) = self.target_pos {
+                    let dx = (tx as i32 - self.x as i32).signum();
+                    let dy = (ty as i32 - self.y as i32).signum();
+                    if dx == 0 && dy == 0 {
+                        NPCAction::Wait
+                    } else {
+                        NPCAction::Move(dx, dy)
+                    }
+                } else {
+                    NPCAction::Wait
+                }
+            }
+            NPCBehavior::Fleeing => {
+                // Flee towards home position
+                let dx = (self.schedule.home_pos.0 as i32 - self.x as i32).signum();
+                let dy = (self.schedule.home_pos.1 as i32 - self.y as i32).signum();
+                NPCAction::Move(dx, dy)
+            }
+            NPCBehavior::Socializing => {
+                // Maybe say something
+                if rng.gen_bool(0.1) {
+                    NPCAction::Talk
+                } else {
+                    NPCAction::Wait
+                }
+            }
+            _ => NPCAction::Wait,
+        }
+    }
+
+    /// Check if NPC is in danger and should flee
+    pub fn check_danger(&mut self, enemies: &[(usize, usize)]) -> bool {
+        for &(ex, ey) in enemies {
+            let dx = (self.x as i32 - ex as i32).abs();
+            let dy = (self.y as i32 - ey as i32).abs();
+            if dx <= 3 && dy <= 3 {
+                self.behavior = NPCBehavior::Fleeing;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Try to start a conversation with another NPC
+    pub fn try_socialize(&mut self, other_id: NPCId) -> bool {
+        if self.action_cooldown > 0 || self.behavior == NPCBehavior::Socializing {
+            return false;
+        }
+
+        self.behavior = NPCBehavior::Socializing;
+        self.conversation_partner = Some(other_id);
+        self.action_cooldown = 30; // Cooldown before next social interaction
+        true
+    }
+
+    /// Generate a random ambient conversation line
+    pub fn get_ambient_line(&self, rng: &mut impl Rng) -> Option<String> {
+        let lines: &[&str] = match self.kind {
+            NPCKind::Merchant | NPCKind::Blacksmith | NPCKind::Enchanter => &[
+                "Business has been slow lately...",
+                "I need to restock soon.",
+                "These dungeons attract all sorts.",
+                "Quality goods, fair prices!",
+            ],
+            NPCKind::Adventurer => &[
+                "The deeper levels are treacherous.",
+                "I've seen things down here...",
+                "Watch out for traps!",
+                "Have you found any good loot?",
+            ],
+            NPCKind::Bard => &[
+                "*hums a tune*",
+                "I should write a song about this place.",
+                "Every hero needs a bard!",
+                "*strums lute quietly*",
+            ],
+            NPCKind::Ghost | NPCKind::PrisonerSpirit => &[
+                "...so cold...",
+                "*fades slightly*",
+                "Remember us...",
+                "The darkness... it calls...",
+            ],
+            NPCKind::Priest | NPCKind::ShrineKeeper => &[
+                "May the light guide you.",
+                "Stay vigilant against evil.",
+                "Blessings upon you.",
+                "*prays quietly*",
+            ],
+            _ => &[
+                "...",
+                "*looks around*",
+                "Hmm...",
+            ],
+        };
+
+        if rng.gen_bool(0.05) {
+            Some(lines[rng.gen_range(0..lines.len())].to_string())
+        } else {
+            None
         }
     }
 

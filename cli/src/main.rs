@@ -18,6 +18,615 @@ use std::collections::VecDeque;
 use shadowcrypt_core::prelude::*;
 
 // ============================================================================
+// BOX DRAWING CHARACTERS FOR UI
+// ============================================================================
+
+mod box_chars {
+    pub const TOP_LEFT: char = '╔';
+    pub const TOP_RIGHT: char = '╗';
+    pub const BOTTOM_LEFT: char = '╚';
+    pub const BOTTOM_RIGHT: char = '╝';
+    pub const HORIZONTAL: char = '═';
+    pub const VERTICAL: char = '║';
+    pub const T_LEFT: char = '╠';
+    pub const T_RIGHT: char = '╣';
+    pub const T_TOP: char = '╦';
+    pub const T_BOTTOM: char = '╩';
+    pub const CROSS: char = '╬';
+
+    // Single line variants
+    pub const S_TOP_LEFT: char = '┌';
+    pub const S_TOP_RIGHT: char = '┐';
+    pub const S_BOTTOM_LEFT: char = '└';
+    pub const S_BOTTOM_RIGHT: char = '┘';
+    pub const S_HORIZONTAL: char = '─';
+    pub const S_VERTICAL: char = '│';
+    pub const S_T_LEFT: char = '├';
+    pub const S_T_RIGHT: char = '┤';
+
+    // Progress bar characters
+    pub const BAR_FULL: char = '█';
+    pub const BAR_HIGH: char = '▓';
+    pub const BAR_MED: char = '▒';
+    pub const BAR_LOW: char = '░';
+    pub const BAR_EMPTY: char = '·';
+}
+
+// ============================================================================
+// ENHANCED SYMBOLS FOR ENTITIES
+// ============================================================================
+
+mod symbols {
+    // Player symbols
+    pub const PLAYER: char = '@';
+    pub const PLAYER_DEAD: char = '%';
+
+    // Enemy symbols by category
+    pub const BEAST_SMALL: char = 'r';      // rats, bats
+    pub const BEAST_MEDIUM: char = 'w';     // wolves
+    pub const BEAST_LARGE: char = 'B';      // bears
+    pub const INSECT: char = 's';           // spiders, wasps
+    pub const HUMANOID_WEAK: char = 'g';    // goblins, kobolds
+    pub const HUMANOID_MED: char = 'o';     // orcs
+    pub const HUMANOID_STRONG: char = 'O';  // ogres
+    pub const UNDEAD_WEAK: char = 'z';      // zombies, skeletons
+    pub const UNDEAD_STRONG: char = 'V';    // vampires, liches
+    pub const GHOST: char = 'G';            // ghosts, wraiths
+    pub const DEMON: char = 'D';            // demons
+    pub const ELEMENTAL: char = 'E';        // elementals
+    pub const BOSS: char = 'X';             // bosses
+
+    // Item symbols
+    pub const POTION: char = '!';
+    pub const SCROLL: char = '?';
+    pub const WEAPON: char = ')';
+    pub const ARMOR: char = '[';
+    pub const SHIELD: char = ']';
+    pub const HELMET: char = '^';
+    pub const RING: char = '=';
+    pub const AMULET: char = '"';
+    pub const GOLD: char = '$';
+    pub const KEY: char = 'k';
+    pub const FOOD: char = '%';
+    pub const MISC: char = '&';
+
+    // Terrain symbols
+    pub const WALL: char = '█';
+    pub const WALL_ALT: char = '▓';
+    pub const FLOOR: char = '·';
+    pub const CORRIDOR: char = '░';
+    pub const DOOR_CLOSED: char = '+';
+    pub const DOOR_OPEN: char = '/';
+    pub const DOOR_LOCKED: char = '╬';
+    pub const STAIRS_DOWN: char = '▼';
+    pub const STAIRS_UP: char = '▲';
+    pub const CHEST: char = '■';
+    pub const CHEST_OPEN: char = '□';
+    pub const TRAP: char = '▽';
+    pub const TRAP_DISABLED: char = '○';
+    pub const SHRINE: char = '♦';
+    pub const WATER: char = '≈';
+    pub const LAVA: char = '~';
+
+    // NPC symbols
+    pub const NPC_MERCHANT: char = 'M';
+    pub const NPC_QUEST: char = 'Q';
+    pub const NPC_TRAINER: char = 'T';
+
+    // Companion symbols
+    pub const COMPANION: char = 'c';
+}
+
+// ============================================================================
+// COLOR THEME DEFINITIONS
+// ============================================================================
+
+mod theme {
+    use crossterm::style::Color;
+
+    // Player colors
+    pub const PLAYER: Color = Color::Rgb { r: 0, g: 255, b: 100 };       // Bright green
+    pub const PLAYER_DANGER: Color = Color::Rgb { r: 255, g: 100, b: 0 }; // Orange when low HP
+
+    // Enemy colors by strength
+    pub const ENEMY_WEAK: Color = Color::Rgb { r: 180, g: 80, b: 80 };
+    pub const ENEMY_NORMAL: Color = Color::Rgb { r: 220, g: 50, b: 50 };
+    pub const ENEMY_STRONG: Color = Color::Rgb { r: 255, g: 0, b: 0 };
+    pub const ENEMY_BOSS: Color = Color::Rgb { r: 255, g: 50, b: 150 };
+
+    // Item colors by rarity
+    pub const ITEM_COMMON: Color = Color::Rgb { r: 200, g: 200, b: 200 };
+    pub const ITEM_UNCOMMON: Color = Color::Rgb { r: 50, g: 255, b: 50 };
+    pub const ITEM_RARE: Color = Color::Rgb { r: 80, g: 150, b: 255 };
+    pub const ITEM_EPIC: Color = Color::Rgb { r: 180, g: 80, b: 255 };
+    pub const ITEM_LEGENDARY: Color = Color::Rgb { r: 255, g: 200, b: 50 };
+
+    // Environment colors
+    pub const WALL: Color = Color::Rgb { r: 80, g: 80, b: 90 };
+    pub const WALL_VISIBLE: Color = Color::Rgb { r: 120, g: 120, b: 140 };
+    pub const FLOOR: Color = Color::Rgb { r: 60, g: 60, b: 70 };
+    pub const FLOOR_VISIBLE: Color = Color::Rgb { r: 100, g: 100, b: 110 };
+    pub const STAIRS: Color = Color::Rgb { r: 0, g: 220, b: 220 };
+    pub const DOOR: Color = Color::Rgb { r: 180, g: 140, b: 60 };
+
+    // NPC colors
+    pub const NPC: Color = Color::Rgb { r: 100, g: 150, b: 255 };
+    pub const COMPANION: Color = Color::Rgb { r: 150, g: 255, b: 150 };
+
+    // UI colors
+    pub const UI_BORDER: Color = Color::Rgb { r: 100, g: 100, b: 120 };
+    pub const UI_TITLE: Color = Color::Rgb { r: 255, g: 220, b: 100 };
+    pub const UI_TEXT: Color = Color::Rgb { r: 200, g: 200, b: 200 };
+    pub const UI_HIGHLIGHT: Color = Color::Rgb { r: 255, g: 255, b: 100 };
+
+    // Status bar colors
+    pub const HP_HIGH: Color = Color::Rgb { r: 50, g: 255, b: 50 };
+    pub const HP_MED: Color = Color::Rgb { r: 255, g: 255, b: 50 };
+    pub const HP_LOW: Color = Color::Rgb { r: 255, g: 50, b: 50 };
+    pub const MP_FULL: Color = Color::Rgb { r: 80, g: 150, b: 255 };
+    pub const MP_LOW: Color = Color::Rgb { r: 50, g: 80, b: 180 };
+    pub const XP_BAR: Color = Color::Rgb { r: 180, g: 80, b: 255 };
+}
+
+// ============================================================================
+// HELP SYSTEM
+// ============================================================================
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HelpPage {
+    Overview,
+    Controls,
+    Items,
+    Enemies,
+    Skills,
+    Mechanics,
+}
+
+impl HelpPage {
+    pub fn title(&self) -> &'static str {
+        match self {
+            HelpPage::Overview => "Game Overview",
+            HelpPage::Controls => "Controls",
+            HelpPage::Items => "Items & Equipment",
+            HelpPage::Enemies => "Enemies",
+            HelpPage::Skills => "Skills & Abilities",
+            HelpPage::Mechanics => "Game Mechanics",
+        }
+    }
+
+    pub fn page_number(&self) -> u8 {
+        match self {
+            HelpPage::Overview => 1,
+            HelpPage::Controls => 2,
+            HelpPage::Items => 3,
+            HelpPage::Enemies => 4,
+            HelpPage::Skills => 5,
+            HelpPage::Mechanics => 6,
+        }
+    }
+
+    pub fn next(&self) -> HelpPage {
+        match self {
+            HelpPage::Overview => HelpPage::Controls,
+            HelpPage::Controls => HelpPage::Items,
+            HelpPage::Items => HelpPage::Enemies,
+            HelpPage::Enemies => HelpPage::Skills,
+            HelpPage::Skills => HelpPage::Mechanics,
+            HelpPage::Mechanics => HelpPage::Overview,
+        }
+    }
+
+    pub fn prev(&self) -> HelpPage {
+        match self {
+            HelpPage::Overview => HelpPage::Mechanics,
+            HelpPage::Controls => HelpPage::Overview,
+            HelpPage::Items => HelpPage::Controls,
+            HelpPage::Enemies => HelpPage::Items,
+            HelpPage::Skills => HelpPage::Enemies,
+            HelpPage::Mechanics => HelpPage::Skills,
+        }
+    }
+
+    pub fn content(&self) -> Vec<(&'static str, &'static str)> {
+        match self {
+            HelpPage::Overview => vec![
+                ("Welcome to ShadowCrypt!", ""),
+                ("", ""),
+                ("A challenging roguelike dungeon crawler where you", ""),
+                ("explore 30 floors of increasingly dangerous depths.", ""),
+                ("", ""),
+                ("OBJECTIVES:", ""),
+                ("  - Survive and grow stronger", ""),
+                ("  - Find better equipment", ""),
+                ("  - Defeat powerful bosses", ""),
+                ("  - Reach the bottom of the dungeon", ""),
+                ("", ""),
+                ("TIPS:", ""),
+                ("  - Don't rush, plan your moves", ""),
+                ("  - Manage your resources carefully", ""),
+                ("  - Know when to retreat", ""),
+                ("  - Use skills strategically", ""),
+            ],
+            HelpPage::Controls => vec![
+                ("MOVEMENT:", ""),
+                ("  Arrow Keys / WASD", " - Move in 4 directions"),
+                ("  HJKL (Vi keys)", " - Move (Roguelike style)"),
+                ("  YUBN", " - Diagonal movement"),
+                ("  Shift+Move", " - Auto-run until interrupted"),
+                ("  5 or .", " - Wait a turn"),
+                ("", ""),
+                ("ACTIONS:", ""),
+                ("  Space", " - Use current skill"),
+                ("  Tab", " - Cycle targets"),
+                ("  F", " - Attack target"),
+                ("  G", " - Pick up items"),
+                ("  > / <", " - Use stairs"),
+                ("", ""),
+                ("MENUS:", ""),
+                ("  I", " - Open inventory"),
+                ("  ?", " - This help screen"),
+                ("  Q / Esc", " - Quit game"),
+            ],
+            HelpPage::Items => vec![
+                ("EQUIPMENT SLOTS:", ""),
+                ("  Weapon, Armor, Shield, Helmet", ""),
+                ("  Gloves, Boots, Ring, Amulet", ""),
+                ("", ""),
+                ("RARITY TIERS:", ""),
+                ("  Common", " - Basic items"),
+                ("  Uncommon", " - Slightly enhanced"),
+                ("  Rare", " - Notable power"),
+                ("  Epic", " - Very powerful"),
+                ("  Legendary", " - Ultimate gear"),
+                ("", ""),
+                ("CONSUMABLES:", ""),
+                ("  ! Potions", " - Healing, mana, buffs"),
+                ("  ? Scrolls", " - Magic effects"),
+                ("  % Food", " - Restore hunger"),
+            ],
+            HelpPage::Enemies => vec![
+                ("ENEMY TYPES:", ""),
+                ("  r - Rats, small beasts", ""),
+                ("  g - Goblins, kobolds", ""),
+                ("  o - Orcs, trolls", ""),
+                ("  z - Undead (zombies, skeletons)", ""),
+                ("  V - Vampires, powerful undead", ""),
+                ("  D - Demons", ""),
+                ("  E - Elementals", ""),
+                ("  X - BOSS (very dangerous!)", ""),
+                ("", ""),
+                ("BEHAVIOR:", ""),
+                ("  Enemies hunt you when visible", ""),
+                ("  Some can see in the dark", ""),
+                ("  Bosses appear every 5 floors", ""),
+            ],
+            HelpPage::Skills => vec![
+                ("SKILL SYSTEM:", ""),
+                ("  Each class has unique skills", ""),
+                ("  Press Space to use current skill", ""),
+                ("  Shift+Tab to cycle skills", ""),
+                ("", ""),
+                ("SKILL COSTS:", ""),
+                ("  Most skills cost mana", ""),
+                ("  Some have cooldowns", ""),
+                ("  Plan usage carefully", ""),
+                ("", ""),
+                ("CLASS ABILITIES:", ""),
+                ("  Warrior - Shield & power attacks", ""),
+                ("  Mage - Elemental magic", ""),
+                ("  Rogue - Stealth & criticals", ""),
+                ("  Paladin - Holy damage & heals", ""),
+                ("  Ranger - Ranged & traps", ""),
+                ("  Necro - Summons & drains", ""),
+            ],
+            HelpPage::Mechanics => vec![
+                ("COMBAT:", ""),
+                ("  Damage = ATK - enemy DEF", ""),
+                ("  Critical hits deal 2x damage", ""),
+                ("  Status effects stack", ""),
+                ("", ""),
+                ("SURVIVAL:", ""),
+                ("  HP regenerates slowly", ""),
+                ("  Hunger decreases over time", ""),
+                ("  0 hunger = HP loss", ""),
+                ("", ""),
+                ("EXPLORATION:", ""),
+                ("  Shrines give bonuses", ""),
+                ("  Chests contain loot", ""),
+                ("  Traps can be avoided", ""),
+                ("  Stairs connect floors", ""),
+            ],
+        }
+    }
+}
+
+pub struct HelpState {
+    pub page: HelpPage,
+    pub scroll_offset: usize,
+}
+
+impl HelpState {
+    pub fn new() -> Self {
+        Self {
+            page: HelpPage::Overview,
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn next_page(&mut self) {
+        self.page = self.page.next();
+        self.scroll_offset = 0;
+    }
+
+    pub fn prev_page(&mut self) {
+        self.page = self.page.prev();
+        self.scroll_offset = 0;
+    }
+
+    pub fn go_to_page(&mut self, page_num: u8) {
+        self.page = match page_num {
+            1 => HelpPage::Overview,
+            2 => HelpPage::Controls,
+            3 => HelpPage::Items,
+            4 => HelpPage::Enemies,
+            5 => HelpPage::Skills,
+            6 => HelpPage::Mechanics,
+            _ => self.page,
+        };
+        self.scroll_offset = 0;
+    }
+}
+
+// ============================================================================
+// TUTORIAL SYSTEM
+// ============================================================================
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TutorialStep {
+    Welcome,
+    Movement,
+    Combat,
+    Items,
+    Skills,
+    Exploration,
+    Survival,
+    Complete,
+}
+
+impl TutorialStep {
+    pub fn title(&self) -> &'static str {
+        match self {
+            TutorialStep::Welcome => "Welcome to ShadowCrypt",
+            TutorialStep::Movement => "Movement Basics",
+            TutorialStep::Combat => "Combat",
+            TutorialStep::Items => "Items & Inventory",
+            TutorialStep::Skills => "Using Skills",
+            TutorialStep::Exploration => "Dungeon Exploration",
+            TutorialStep::Survival => "Survival Tips",
+            TutorialStep::Complete => "Tutorial Complete",
+        }
+    }
+
+    pub fn step_number(&self) -> u8 {
+        match self {
+            TutorialStep::Welcome => 1,
+            TutorialStep::Movement => 2,
+            TutorialStep::Combat => 3,
+            TutorialStep::Items => 4,
+            TutorialStep::Skills => 5,
+            TutorialStep::Exploration => 6,
+            TutorialStep::Survival => 7,
+            TutorialStep::Complete => 8,
+        }
+    }
+
+    pub fn lines(&self) -> Vec<&'static str> {
+        match self {
+            TutorialStep::Welcome => vec![
+                "Welcome, adventurer!",
+                "",
+                "You stand at the entrance of ShadowCrypt,",
+                "a dungeon filled with monsters and treasure.",
+                "",
+                "Your goal: Descend 30 floors and survive!",
+                "",
+                "This tutorial will teach you the basics.",
+            ],
+            TutorialStep::Movement => vec![
+                "MOVEMENT CONTROLS:",
+                "",
+                "  Arrow Keys - Move in 4 directions",
+                "  WASD - Alternative movement",
+                "  YUBN - Diagonal movement",
+                "",
+                "  Hold Shift + direction to auto-run",
+                "  Press . or 5 to wait a turn",
+            ],
+            TutorialStep::Combat => vec![
+                "COMBAT BASICS:",
+                "",
+                "  Walk into enemies to attack them",
+                "  Press Tab to cycle through targets",
+                "  Press F to attack your current target",
+                "",
+                "  Watch your HP! Red = danger!",
+                "  Retreat if overwhelmed.",
+            ],
+            TutorialStep::Items => vec![
+                "ITEMS & EQUIPMENT:",
+                "",
+                "  Press G to pick up items",
+                "  Press I to open inventory",
+                "  Number keys 1-9 to quick-use items",
+                "",
+                "  Better equipment = stronger character",
+                "  Watch for color-coded rarity!",
+            ],
+            TutorialStep::Skills => vec![
+                "USING SKILLS:",
+                "",
+                "  Press Space to use your current skill",
+                "  Shift+Tab to cycle between skills",
+                "",
+                "  Skills cost mana (blue bar)",
+                "  Each class has unique abilities",
+            ],
+            TutorialStep::Exploration => vec![
+                "EXPLORING THE DUNGEON:",
+                "",
+                "  > = Stairs down (next floor)",
+                "  < = Stairs up (previous floor)",
+                "  $ = Chests with loot",
+                "  * = Shrines give bonuses",
+                "",
+                "  The deeper you go, the harder it gets!",
+            ],
+            TutorialStep::Survival => vec![
+                "SURVIVAL TIPS:",
+                "",
+                "  - Manage your hunger (eat food!)",
+                "  - Save potions for emergencies",
+                "  - Don't fight every enemy",
+                "  - Explore carefully",
+                "",
+                "  Good luck, adventurer!",
+            ],
+            TutorialStep::Complete => vec![
+                "TUTORIAL COMPLETE!",
+                "",
+                "You now know the basics of ShadowCrypt.",
+                "",
+                "Press ? anytime to see the help menu.",
+                "",
+                "May fortune favor the bold!",
+            ],
+        }
+    }
+
+    pub fn hint(&self) -> &'static str {
+        match self {
+            TutorialStep::Complete => "[Press any key to begin your adventure]",
+            _ => "[Press Space to continue, Esc to skip tutorial]",
+        }
+    }
+
+    pub fn next(&self) -> TutorialStep {
+        match self {
+            TutorialStep::Welcome => TutorialStep::Movement,
+            TutorialStep::Movement => TutorialStep::Combat,
+            TutorialStep::Combat => TutorialStep::Items,
+            TutorialStep::Items => TutorialStep::Skills,
+            TutorialStep::Skills => TutorialStep::Exploration,
+            TutorialStep::Exploration => TutorialStep::Survival,
+            TutorialStep::Survival => TutorialStep::Complete,
+            TutorialStep::Complete => TutorialStep::Complete,
+        }
+    }
+}
+
+pub struct TutorialState {
+    pub step: TutorialStep,
+    pub active: bool,
+    pub completed: bool,
+}
+
+impl TutorialState {
+    pub fn new() -> Self {
+        Self {
+            step: TutorialStep::Welcome,
+            active: false,
+            completed: false,
+        }
+    }
+
+    pub fn advance(&mut self) {
+        if self.step == TutorialStep::Complete {
+            self.active = false;
+            self.completed = true;
+        } else {
+            self.step = self.step.next();
+        }
+    }
+
+    pub fn skip(&mut self) {
+        self.active = false;
+        self.completed = true;
+    }
+}
+
+// ============================================================================
+// ASCII ART SCREENS
+// ============================================================================
+
+pub const TITLE_ART: &str = r#"
+    ███████╗██╗  ██╗ █████╗ ██████╗  ██████╗ ██╗    ██╗ ██████╗██████╗ ██╗   ██╗██████╗ ████████╗
+    ██╔════╝██║  ██║██╔══██╗██╔══██╗██╔═══██╗██║    ██║██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗╚══██╔══╝
+    ███████╗███████║███████║██║  ██║██║   ██║██║ █╗ ██║██║     ██████╔╝ ╚████╔╝ ██████╔╝   ██║
+    ╚════██║██╔══██║██╔══██║██║  ██║██║   ██║██║███╗██║██║     ██╔══██╗  ╚██╔╝  ██╔═══╝    ██║
+    ███████║██║  ██║██║  ██║██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗██║  ██║   ██║   ██║        ██║
+    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝        ╚═╝
+"#;
+
+pub const DEATH_ART: &str = r#"
+                              ___________
+                             /           \
+                            /   R.I.P.    \
+                           /               \
+                          |   Here lies    |
+                          |   a brave      |
+                          |   adventurer   |
+                          |                |
+                     _____|________________|_____
+                    /                            \
+                   /        ╔═══════════╗         \
+                  |         ║  YOU DIED ║          |
+                   \        ╚═══════════╝         /
+                    \____________________________/
+"#;
+
+pub const VICTORY_ART: &str = r#"
+                                    ╔════════════════════════════════╗
+                                    ║                                ║
+        ██╗   ██╗██╗ ██████╗████████║  ★  ★  ★  CHAMPION  ★  ★  ★   ║
+        ██║   ██║██║██╔════╝╚══██╔══║                                ║
+        ██║   ██║██║██║        ██║  ║  You have conquered the       ║
+        ╚██╗ ██╔╝██║██║        ██║  ║  depths of ShadowCrypt!       ║
+         ╚████╔╝ ██║╚██████╗   ██║  ║                                ║
+          ╚═══╝  ╚═╝ ╚═════╝   ╚═╝  ║  Your legend will be          ║
+                ██████╗ ██████╗ ██╗ ║  remembered forever!           ║
+                ██╔══██╗╚════██╗██║ ║                                ║
+                ██████╔╝ █████╔╝██║ ╚════════════════════════════════╝
+                ██╔══██╗ ╚═══██╗╚═╝
+                ██║  ██║██████╔╝██╗
+                ╚═╝  ╚═╝╚═════╝ ╚═╝
+"#;
+
+pub const BOSS_ART: &str = r#"
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║                                                                  ║
+    ║     ██████╗  ██████╗ ███████╗███████╗    ██╗██╗██╗               ║
+    ║     ██╔══██╗██╔═══██╗██╔════╝██╔════╝    ██║██║██║               ║
+    ║     ██████╔╝██║   ██║███████╗███████╗    ██║██║██║               ║
+    ║     ██╔══██╗██║   ██║╚════██║╚════██║    ╚═╝╚═╝╚═╝               ║
+    ║     ██████╔╝╚██████╔╝███████║███████║    ██╗██╗██╗               ║
+    ║     ╚═════╝  ╚═════╝ ╚══════╝╚══════╝    ╚═╝╚═╝╚═╝               ║
+    ║                                                                  ║
+    ║              A POWERFUL ENEMY APPROACHES...                      ║
+    ║                                                                  ║
+    ╚══════════════════════════════════════════════════════════════════╝
+"#;
+
+pub const LEVEL_UP_ART: &str = r#"
+    ╔════════════════════════════════════════╗
+    ║    ★ ★ ★  L E V E L   U P !  ★ ★ ★    ║
+    ╠════════════════════════════════════════╣
+    ║                                        ║
+    ║     Your power has increased!          ║
+    ║                                        ║
+    ╚════════════════════════════════════════╝
+"#;
+
+// ============================================================================
 // COMBAT ANIMATION SYSTEM
 // ============================================================================
 
@@ -1180,50 +1789,60 @@ fn render_status_effects_bar(
     Ok(())
 }
 
-/// Get the terminal glyph for a tile
+/// Get the terminal glyph for a tile (enhanced with better symbols)
 fn tile_glyph(tile: &Tile) -> char {
     match tile {
-        Tile::Wall => '#',
-        Tile::Floor => '.',
-        Tile::Corridor => '.',
-        Tile::Door => '+',
-        Tile::OpenDoor => '/',
-        Tile::LockedDoor => '%',
-        Tile::StairsDown => '>',
-        Tile::StairsUp => '<',
-        Tile::Chest => '$',
-        Tile::OpenChest => '_',
-        Tile::Trap => '^',
-        Tile::DisarmedTrap => '~',
-        Tile::Shrine => '*',
-        Tile::UsedShrine => '.',
-        Tile::Water => '~',
-        Tile::Lava => '~',
+        Tile::Wall => symbols::WALL,
+        Tile::Floor => symbols::FLOOR,
+        Tile::Corridor => symbols::CORRIDOR,
+        Tile::Door => symbols::DOOR_CLOSED,
+        Tile::OpenDoor => symbols::DOOR_OPEN,
+        Tile::LockedDoor => symbols::DOOR_LOCKED,
+        Tile::StairsDown => symbols::STAIRS_DOWN,
+        Tile::StairsUp => symbols::STAIRS_UP,
+        Tile::Chest => symbols::CHEST,
+        Tile::OpenChest => symbols::CHEST_OPEN,
+        Tile::Trap => symbols::TRAP,
+        Tile::DisarmedTrap => symbols::TRAP_DISABLED,
+        Tile::Shrine => symbols::SHRINE,
+        Tile::UsedShrine => symbols::FLOOR,
+        Tile::Water => symbols::WATER,
+        Tile::Lava => symbols::LAVA,
         Tile::Sand => '.',
         Tile::Grass => '"',
         Tile::Ice => '=',
     }
 }
 
-/// Get the terminal color for a tile
+/// Get the terminal color for a tile (enhanced with theme colors)
 fn tile_color(tile: &Tile) -> Color {
     match tile {
-        Tile::Wall => Color::Grey,
-        Tile::Floor | Tile::Corridor => Color::White,
-        Tile::Door | Tile::OpenDoor => Color::Yellow,
-        Tile::LockedDoor => Color::Red,
-        Tile::StairsDown | Tile::StairsUp => Color::Cyan,
-        Tile::Chest => Color::Yellow,
-        Tile::OpenChest => Color::DarkYellow,
-        Tile::Trap => Color::Red,
-        Tile::DisarmedTrap => Color::DarkGrey,
-        Tile::Shrine => Color::Magenta,
-        Tile::UsedShrine => Color::DarkMagenta,
-        Tile::Water => Color::Blue,
-        Tile::Lava => Color::Red,
-        Tile::Sand => Color::Yellow,
-        Tile::Grass => Color::Green,
-        Tile::Ice => Color::Cyan,
+        Tile::Wall => theme::WALL_VISIBLE,
+        Tile::Floor | Tile::Corridor => theme::FLOOR_VISIBLE,
+        Tile::Door | Tile::OpenDoor => theme::DOOR,
+        Tile::LockedDoor => Color::Rgb { r: 200, g: 50, b: 50 },
+        Tile::StairsDown | Tile::StairsUp => theme::STAIRS,
+        Tile::Chest => Color::Rgb { r: 255, g: 215, b: 0 },
+        Tile::OpenChest => Color::Rgb { r: 139, g: 119, b: 42 },
+        Tile::Trap => Color::Rgb { r: 255, g: 80, b: 80 },
+        Tile::DisarmedTrap => Color::Rgb { r: 80, g: 80, b: 80 },
+        Tile::Shrine => Color::Rgb { r: 200, g: 100, b: 255 },
+        Tile::UsedShrine => Color::Rgb { r: 100, g: 50, b: 130 },
+        Tile::Water => Color::Rgb { r: 50, g: 100, b: 200 },
+        Tile::Lava => Color::Rgb { r: 255, g: 100, b: 0 },
+        Tile::Sand => Color::Rgb { r: 210, g: 180, b: 100 },
+        Tile::Grass => Color::Rgb { r: 50, g: 180, b: 50 },
+        Tile::Ice => Color::Rgb { r: 150, g: 220, b: 255 },
+    }
+}
+
+/// Get dimmed tile color for explored but not visible tiles
+fn tile_color_dim(tile: &Tile) -> Color {
+    match tile {
+        Tile::Wall => theme::WALL,
+        Tile::Floor | Tile::Corridor => theme::FLOOR,
+        Tile::StairsDown | Tile::StairsUp => Color::Rgb { r: 0, g: 100, b: 100 },
+        _ => Color::Rgb { r: 50, g: 50, b: 60 },
     }
 }
 
@@ -1476,14 +2095,14 @@ fn item_glyph(kind: &ItemKind) -> char {
     }
 }
 
-/// Get the terminal color for a rarity
+/// Get the terminal color for a rarity (enhanced with theme colors)
 fn rarity_color(rarity: &Rarity) -> Color {
     match rarity {
-        Rarity::Common => Color::White,
-        Rarity::Uncommon => Color::Green,
-        Rarity::Rare => Color::Blue,
-        Rarity::Epic => Color::Magenta,
-        Rarity::Legendary => Color::Yellow,
+        Rarity::Common => theme::ITEM_COMMON,
+        Rarity::Uncommon => theme::ITEM_UNCOMMON,
+        Rarity::Rare => theme::ITEM_RARE,
+        Rarity::Epic => theme::ITEM_EPIC,
+        Rarity::Legendary => theme::ITEM_LEGENDARY,
     }
 }
 

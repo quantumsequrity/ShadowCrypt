@@ -1,4 +1,7 @@
 //! Entity system: player, enemies, and their properties
+//!
+//! This module provides a complete autonomous entity system where all entities
+//! (enemies, NPCs, companions) move and act independently, creating a living world.
 
 use std::collections::HashMap;
 use rand::prelude::*;
@@ -9,6 +12,530 @@ use crate::combat::{StatusEffect, ElementType, ElementalResistances};
 use crate::companions::Companion;
 use crate::items::{EquipSlot, Item, ItemKind, FoodQuality};
 use crate::magic::Skill;
+
+// ============================================================================
+// Autonomous Entity Behavior System
+// ============================================================================
+
+/// Behavioral states for autonomous entities
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Default)]
+pub enum EntityBehavior {
+    /// Standing still, waiting for stimuli
+    #[default]
+    Idle,
+    /// Moving along a set patrol route
+    Patrol,
+    /// Actively hunting a target (player or other enemy)
+    Hunt,
+    /// Running away from danger
+    Flee,
+    /// Guarding a specific location
+    Guard,
+    /// Wandering randomly
+    Wander,
+    /// Engaged in trading activities (for merchants)
+    Trade,
+    /// Sleeping/resting (reduced awareness)
+    Sleep,
+    /// Fighting another entity
+    Combat,
+    /// Socializing with another entity
+    Socialize,
+    /// Following another entity
+    Follow,
+    /// Investigating a sound or event
+    Investigate,
+    /// Territorial defense - attacking intruders
+    Territorial,
+    /// Foraging/hunting for food (wild creatures)
+    Forage,
+}
+
+impl EntityBehavior {
+    /// Returns the display name of this behavior
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Idle => "Idle",
+            Self::Patrol => "Patrolling",
+            Self::Hunt => "Hunting",
+            Self::Flee => "Fleeing",
+            Self::Guard => "Guarding",
+            Self::Wander => "Wandering",
+            Self::Trade => "Trading",
+            Self::Sleep => "Sleeping",
+            Self::Combat => "Fighting",
+            Self::Socialize => "Socializing",
+            Self::Follow => "Following",
+            Self::Investigate => "Investigating",
+            Self::Territorial => "Defending Territory",
+            Self::Forage => "Foraging",
+        }
+    }
+
+    /// Returns the awareness level (0.0 - 1.0) for this behavior
+    pub fn awareness(&self) -> f32 {
+        match self {
+            Self::Sleep => 0.2,
+            Self::Idle => 0.5,
+            Self::Wander | Self::Forage => 0.6,
+            Self::Trade | Self::Socialize => 0.4,
+            Self::Patrol | Self::Guard => 0.8,
+            Self::Hunt | Self::Combat | Self::Territorial => 1.0,
+            Self::Flee | Self::Investigate => 0.9,
+            Self::Follow => 0.7,
+        }
+    }
+}
+
+/// Movement patterns for entities
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub enum MovementPattern {
+    /// Entity stays in place
+    #[default]
+    Stationary,
+    /// Moves randomly within an area
+    Random { radius: usize },
+    /// Patrols between waypoints
+    Patrol { waypoints: Vec<(usize, usize)>, current_idx: usize, reverse: bool },
+    /// Follows another entity (by position tracking)
+    Follow { target_x: usize, target_y: usize, min_dist: usize, max_dist: usize },
+    /// Flees from a position
+    Flee { from_x: usize, from_y: usize },
+    /// Circles around a point
+    Circle { center_x: usize, center_y: usize, radius: usize, angle: f32 },
+    /// Moves towards a specific destination
+    Destination { target_x: usize, target_y: usize },
+    /// Territorial - stays within a defined area
+    Territory { center_x: usize, center_y: usize, radius: usize },
+}
+
+impl MovementPattern {
+    /// Create a patrol pattern between points
+    pub fn new_patrol(points: Vec<(usize, usize)>) -> Self {
+        Self::Patrol { waypoints: points, current_idx: 0, reverse: false }
+    }
+
+    /// Create a territory pattern
+    pub fn new_territory(x: usize, y: usize, radius: usize) -> Self {
+        Self::Territory { center_x: x, center_y: y, radius }
+    }
+
+    /// Create a follow pattern
+    pub fn new_follow(x: usize, y: usize) -> Self {
+        Self::Follow { target_x: x, target_y: y, min_dist: 2, max_dist: 5 }
+    }
+}
+
+/// Disposition towards other entities
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+pub enum EntityDisposition {
+    /// Will attack on sight
+    Hostile,
+    /// Wary but won't attack unprovoked
+    #[default]
+    Neutral,
+    /// Friendly, will help
+    Friendly,
+    /// Allied, will fight together
+    Allied,
+    /// Fearful, will flee
+    Fearful,
+}
+
+/// Entity faction for determining relationships
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Default)]
+pub enum EntityFaction {
+    /// Player and allies
+    Player,
+    /// Undead creatures
+    Undead,
+    /// Goblinoid creatures
+    Goblinoid,
+    /// Beast/animal creatures
+    Beast,
+    /// Elemental creatures
+    Elemental,
+    /// Demon creatures
+    Demon,
+    /// Neutral creatures
+    #[default]
+    Neutral,
+    /// Friendly NPCs
+    Friendly,
+    /// Wild/untamed creatures
+    Wild,
+}
+
+impl EntityFaction {
+    /// Get disposition towards another faction
+    pub fn disposition_towards(&self, other: &EntityFaction) -> EntityDisposition {
+        if self == other {
+            return EntityDisposition::Allied;
+        }
+
+        match (self, other) {
+            // Player relations
+            (EntityFaction::Player, EntityFaction::Friendly) => EntityDisposition::Friendly,
+            (EntityFaction::Friendly, EntityFaction::Player) => EntityDisposition::Friendly,
+
+            // Hostile factions
+            (EntityFaction::Undead, EntityFaction::Beast) => EntityDisposition::Hostile,
+            (EntityFaction::Beast, EntityFaction::Undead) => EntityDisposition::Hostile,
+            (EntityFaction::Goblinoid, EntityFaction::Beast) => EntityDisposition::Hostile,
+            (EntityFaction::Demon, _) => EntityDisposition::Hostile,
+            (_, EntityFaction::Demon) => EntityDisposition::Hostile,
+
+            // Territorial conflicts
+            (EntityFaction::Beast, EntityFaction::Wild) => EntityDisposition::Neutral,
+            (EntityFaction::Wild, _) => EntityDisposition::Hostile,
+
+            // All hostile to player
+            (_, EntityFaction::Player) => EntityDisposition::Hostile,
+            (EntityFaction::Player, _) => EntityDisposition::Hostile,
+
+            _ => EntityDisposition::Neutral,
+        }
+    }
+}
+
+/// AI decision-making for autonomous entities
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct EntityAI {
+    /// Current behavior state
+    pub behavior: EntityBehavior,
+    /// Movement pattern
+    pub movement: MovementPattern,
+    /// Entity faction
+    pub faction: EntityFaction,
+    /// Action points (speed-based action scheduling)
+    pub action_points: i32,
+    /// Action cost for different actions
+    pub base_speed: i32,
+    /// Current target position (if any)
+    pub target_pos: Option<(usize, usize)>,
+    /// Current target entity ID (if tracking someone)
+    pub target_entity: Option<u64>,
+    /// Home position (for territorial/guard behavior)
+    pub home_pos: Option<(usize, usize)>,
+    /// Aggro range - how far entity can detect threats
+    pub aggro_range: usize,
+    /// Vision range
+    pub vision_range: usize,
+    /// Memory of last seen player position
+    pub last_seen_player: Option<(usize, usize)>,
+    /// Turns since last saw player
+    pub turns_since_player: u32,
+    /// Interest points for investigation
+    pub interest_points: Vec<(usize, usize, u32)>, // x, y, priority
+    /// Time spent in current behavior
+    pub behavior_timer: u32,
+    /// Whether entity is currently active (for sleep cycles)
+    pub is_active: bool,
+    /// Preferred time of activity (for day/night cycles)
+    pub active_time: ActivityTime,
+    /// Social cooldown (for NPC interactions)
+    pub social_cooldown: u32,
+    /// Restock timer (for merchants)
+    pub restock_timer: u32,
+}
+
+/// Time preference for entity activity
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+pub enum ActivityTime {
+    /// Active during day
+    Diurnal,
+    /// Active during night
+    Nocturnal,
+    /// Always active
+    #[default]
+    Always,
+    /// Active at dawn/dusk
+    Crepuscular,
+}
+
+impl Default for EntityAI {
+    fn default() -> Self {
+        Self {
+            behavior: EntityBehavior::Idle,
+            movement: MovementPattern::Stationary,
+            faction: EntityFaction::Neutral,
+            action_points: 0,
+            base_speed: 10,
+            target_pos: None,
+            target_entity: None,
+            home_pos: None,
+            aggro_range: 8,
+            vision_range: 10,
+            last_seen_player: None,
+            turns_since_player: 0,
+            interest_points: Vec::new(),
+            behavior_timer: 0,
+            is_active: true,
+            active_time: ActivityTime::Always,
+            social_cooldown: 0,
+            restock_timer: 0,
+        }
+    }
+}
+
+impl EntityAI {
+    /// Create AI for an enemy type
+    pub fn for_enemy(kind: EnemyKind) -> Self {
+        let mut ai = Self::default();
+
+        // Set faction based on enemy type
+        ai.faction = kind.faction();
+
+        // Set behavior and movement based on enemy type
+        match kind {
+            // Undead tend to patrol or guard
+            EnemyKind::Skeleton | EnemyKind::Zombie | EnemyKind::Mummy => {
+                ai.behavior = EntityBehavior::Patrol;
+                ai.active_time = ActivityTime::Nocturnal;
+            }
+            // Ghosts wander
+            EnemyKind::Ghost | EnemyKind::Wraith | EnemyKind::Banshee => {
+                ai.behavior = EntityBehavior::Wander;
+                ai.movement = MovementPattern::Random { radius: 15 };
+                ai.active_time = ActivityTime::Nocturnal;
+            }
+            // Beasts are territorial
+            EnemyKind::Wolf | EnemyKind::DireWolf | EnemyKind::CaveBear => {
+                ai.behavior = EntityBehavior::Territorial;
+                ai.aggro_range = 10;
+            }
+            // Goblins patrol and investigate
+            EnemyKind::Goblin | EnemyKind::Hobgoblin | EnemyKind::Kobold => {
+                ai.behavior = EntityBehavior::Patrol;
+                ai.aggro_range = 6;
+            }
+            // Spiders ambush
+            EnemyKind::Spider | EnemyKind::GiantSpider | EnemyKind::IceSpider => {
+                ai.behavior = EntityBehavior::Guard;
+                ai.aggro_range = 4;
+            }
+            // Bosses guard their room
+            _ if kind.is_boss() => {
+                ai.behavior = EntityBehavior::Guard;
+                ai.aggro_range = 15;
+                ai.vision_range = 20;
+            }
+            // Default behavior
+            _ => {
+                ai.behavior = EntityBehavior::Wander;
+                ai.movement = MovementPattern::Random { radius: 8 };
+            }
+        }
+
+        ai
+    }
+
+    /// Update action points based on speed
+    pub fn tick_action_points(&mut self) {
+        self.action_points += self.base_speed;
+    }
+
+    /// Check if entity has enough action points to act
+    pub fn can_act(&self) -> bool {
+        self.action_points >= 10
+    }
+
+    /// Consume action points for an action
+    pub fn consume_action(&mut self, cost: i32) {
+        self.action_points -= cost;
+    }
+
+    /// Add an interest point for investigation
+    pub fn add_interest(&mut self, x: usize, y: usize, priority: u32) {
+        // Remove old interest at same position
+        self.interest_points.retain(|(ix, iy, _)| *ix != x || *iy != y);
+        self.interest_points.push((x, y, priority));
+        // Sort by priority (highest first)
+        self.interest_points.sort_by(|a, b| b.2.cmp(&a.2));
+        // Keep only top 5 interests
+        self.interest_points.truncate(5);
+    }
+
+    /// Get the highest priority interest point
+    pub fn get_top_interest(&self) -> Option<(usize, usize)> {
+        self.interest_points.first().map(|(x, y, _)| (*x, *y))
+    }
+
+    /// Decay interest points over time
+    pub fn decay_interests(&mut self) {
+        for (_, _, priority) in &mut self.interest_points {
+            *priority = priority.saturating_sub(1);
+        }
+        self.interest_points.retain(|(_, _, p)| *p > 0);
+    }
+
+    /// Update behavior based on current state
+    pub fn update_behavior(&mut self, can_see_player: bool, player_dist: f32, hp_percent: f32) {
+        self.behavior_timer += 1;
+
+        // Flee if low health
+        if hp_percent < 0.2 && self.behavior != EntityBehavior::Flee {
+            self.behavior = EntityBehavior::Flee;
+            self.behavior_timer = 0;
+            return;
+        }
+
+        // Hunt if player visible and aggressive
+        if can_see_player && player_dist < self.aggro_range as f32 {
+            if self.behavior != EntityBehavior::Hunt && self.behavior != EntityBehavior::Flee {
+                self.behavior = EntityBehavior::Hunt;
+                self.behavior_timer = 0;
+            }
+            self.turns_since_player = 0;
+            return;
+        }
+
+        // Update turns since player
+        self.turns_since_player += 1;
+
+        // Return to default behavior after losing player
+        if self.turns_since_player > 10 && self.behavior == EntityBehavior::Hunt {
+            self.behavior = EntityBehavior::Patrol;
+            self.behavior_timer = 0;
+        }
+
+        // Investigate sounds/events
+        if !self.interest_points.is_empty() && self.behavior != EntityBehavior::Hunt {
+            self.behavior = EntityBehavior::Investigate;
+        }
+    }
+}
+
+/// Actions an entity can take autonomously
+#[derive(Clone, Debug)]
+pub enum EntityAction {
+    /// Move in a direction
+    Move(i32, i32),
+    /// Attack a target at position
+    Attack(usize, usize),
+    /// Use a special ability
+    UseAbility(usize), // ability index
+    /// Wait/do nothing
+    Wait,
+    /// Flee from combat
+    Flee,
+    /// Interact with another entity (NPC conversation, etc.)
+    Interact(u64), // target entity ID
+    /// Patrol to next waypoint
+    PatrolNext,
+    /// Guard current position
+    Guard,
+    /// Investigate a point of interest
+    Investigate(usize, usize),
+    /// Rest/sleep
+    Rest,
+    /// Restock inventory (merchants)
+    Restock,
+    /// Make noise (alerts nearby entities)
+    MakeNoise(u32), // noise radius
+}
+
+/// Result of entity interaction
+#[derive(Clone, Debug)]
+pub struct EntityInteractionResult {
+    pub messages: Vec<String>,
+    pub damage_dealt: Option<(u64, i32)>, // target_id, damage
+    pub status_applied: Option<(u64, StatusEffect, u32)>, // target_id, effect, duration
+    pub sound_made: Option<(usize, usize, u32)>, // x, y, radius
+    pub xp_gained: Option<u32>,
+    pub entity_died: Option<u64>,
+}
+
+impl Default for EntityInteractionResult {
+    fn default() -> Self {
+        Self {
+            messages: Vec::new(),
+            damage_dealt: None,
+            status_applied: None,
+            sound_made: None,
+            xp_gained: None,
+            entity_died: None,
+        }
+    }
+}
+
+// ============================================================================
+// Entity Scheduling System
+// ============================================================================
+
+/// Scheduler for processing entity actions in order of speed
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct EntityScheduler {
+    /// Queue of entity IDs sorted by action points
+    action_queue: Vec<(u64, i32)>, // entity_id, action_points
+    /// Current game tick
+    pub current_tick: u64,
+    /// Base time units per turn
+    pub time_per_turn: u32,
+}
+
+impl EntityScheduler {
+    pub fn new() -> Self {
+        Self {
+            action_queue: Vec::new(),
+            current_tick: 0,
+            time_per_turn: 100,
+        }
+    }
+
+    /// Add an entity to the scheduler
+    pub fn add_entity(&mut self, entity_id: u64, speed: i32) {
+        self.action_queue.push((entity_id, speed));
+        self.sort_queue();
+    }
+
+    /// Remove an entity from the scheduler
+    pub fn remove_entity(&mut self, entity_id: u64) {
+        self.action_queue.retain(|(id, _)| *id != entity_id);
+    }
+
+    /// Update an entity's action points
+    pub fn update_entity(&mut self, entity_id: u64, action_points: i32) {
+        if let Some((_, ap)) = self.action_queue.iter_mut().find(|(id, _)| *id == entity_id) {
+            *ap = action_points;
+        }
+        self.sort_queue();
+    }
+
+    /// Get the next entity to act
+    pub fn next_actor(&mut self) -> Option<u64> {
+        if let Some((id, ap)) = self.action_queue.first() {
+            if *ap >= 10 {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    /// Advance time and grant action points to all entities
+    pub fn tick(&mut self, entities: &mut [(u64, i32)]) {
+        self.current_tick += 1;
+        for (id, speed) in entities {
+            if let Some((_, ap)) = self.action_queue.iter_mut().find(|(eid, _)| *eid == *id) {
+                *ap += *speed;
+            }
+        }
+        self.sort_queue();
+    }
+
+    /// Sort the queue by action points (highest first)
+    fn sort_queue(&mut self) {
+        self.action_queue.sort_by(|a, b| b.1.cmp(&a.1));
+    }
+
+    /// Get all entities ready to act this turn
+    pub fn get_ready_entities(&self) -> Vec<u64> {
+        self.action_queue.iter()
+            .filter(|(_, ap)| *ap >= 10)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+}
 
 /// Hunger stages with increasing severity
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug)]
@@ -657,6 +1184,80 @@ impl EnemyKind {
         )
     }
 
+    /// Returns the faction this enemy belongs to
+    pub fn faction(&self) -> EntityFaction {
+        match self {
+            // Undead faction
+            Self::Skeleton | Self::Zombie | Self::Ghost | Self::Wraith
+            | Self::Vampire | Self::Mummy | Self::Ghoul | Self::Banshee
+            | Self::DeathKnight | Self::BoneGolem | Self::Lich | Self::MummyLord
+            | Self::IceWraith | Self::CinderWraith | Self::BossVampireLord
+            | Self::VampireElite => EntityFaction::Undead,
+
+            // Goblinoid faction
+            Self::Goblin | Self::Hobgoblin | Self::Kobold | Self::Orc
+            | Self::CaveOgre | Self::Troll | Self::ForestTroll
+            | Self::BossGoblinKing | Self::GoblinChampion
+            | Self::BossOrcWarlord | Self::OrcBerserker => EntityFaction::Goblinoid,
+
+            // Beast faction
+            Self::Rat | Self::GiantRat | Self::Bat | Self::Wolf | Self::DireWolf
+            | Self::CaveBear | Self::WildBoar | Self::FrostWolf => EntityFaction::Beast,
+
+            // Elemental faction
+            Self::RockElemental | Self::IceElemental | Self::FireElemental
+            | Self::LavaGolem | Self::MagmaSlime | Self::Golem
+            | Self::FrostGiant | Self::CursedStatue | Self::Salamander => EntityFaction::Elemental,
+
+            // Demon faction
+            Self::Demon | Self::DemonLord | Self::Succubus | Self::Balrog
+            | Self::PitFiend | Self::ShadowDemon | Self::AbyssalHorror | Self::DoomGuard
+            | Self::InfernalImp | Self::Hellhound | Self::BossDemonKing | Self::InfernalLord => EntityFaction::Demon,
+
+            // Wild faction (aggressive animals/creatures)
+            Self::Spider | Self::GiantSpider | Self::IceSpider | Self::Slime
+            | Self::Mushroom | Self::VenomousVine | Self::GiantWasp
+            | Self::YetiWarrior | Self::Wendigo | Self::CaveCrawler => EntityFaction::Wild,
+
+            // Default neutral
+            _ => EntityFaction::Neutral,
+        }
+    }
+
+    /// Returns whether this enemy is territorial (will fight others for space)
+    pub fn is_territorial(&self) -> bool {
+        matches!(
+            self,
+            Self::Wolf | Self::DireWolf | Self::CaveBear | Self::Spider
+            | Self::GiantSpider | Self::Orc | Self::Troll | Self::TreeEnt
+            | Self::YetiWarrior | Self::FireDrake | Self::FrostGiant
+        )
+    }
+
+    /// Returns whether this enemy hunts other creatures
+    pub fn is_predator(&self) -> bool {
+        matches!(
+            self,
+            Self::Wolf | Self::DireWolf | Self::Spider | Self::GiantSpider
+            | Self::Vampire | Self::Wraith | Self::Hellhound | Self::Wendigo
+            | Self::FrostWolf | Self::Ghoul
+        )
+    }
+
+    /// Returns prey types this enemy will hunt
+    pub fn prey_factions(&self) -> Vec<EntityFaction> {
+        if self.is_predator() {
+            match self.faction() {
+                EntityFaction::Beast => vec![EntityFaction::Wild, EntityFaction::Goblinoid],
+                EntityFaction::Undead => vec![EntityFaction::Beast, EntityFaction::Goblinoid],
+                EntityFaction::Demon => vec![EntityFaction::Beast, EntityFaction::Undead, EntityFaction::Goblinoid],
+                _ => vec![],
+            }
+        } else {
+            vec![]
+        }
+    }
+
     /// Returns a random enemy for the given dungeon level
     pub fn for_level(level: u32, rng: &mut impl Rng) -> Self {
         let enemies: Vec<Self> = match level {
@@ -700,28 +1301,85 @@ impl EnemyKind {
     }
 }
 
-/// An enemy instance
+/// An enemy instance with autonomous AI behavior
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Enemy {
+    /// Unique identifier for this enemy instance
+    pub id: u64,
+    /// Position X
     pub x: usize,
+    /// Position Y
     pub y: usize,
+    /// Enemy type
     pub kind: EnemyKind,
+    /// Current health
     pub hp: i32,
+    /// Maximum health
     pub max_hp: i32,
+    /// Attack power
     pub attack: i32,
+    /// Defense value
     pub defense: i32,
+    /// Experience value when killed
     pub xp_value: u32,
+    /// Speed (affects action order)
+    pub speed: i32,
+    /// Active status effects with duration
     pub status_effects: HashMap<StatusEffect, u32>,
+    /// Last known player position
     pub last_seen_player: Option<(usize, usize)>,
+    /// Autonomous AI state
+    pub ai: EntityAI,
+    /// Current target (another enemy ID for inter-enemy combat)
+    pub current_target: Option<u64>,
+    /// Damage dealt to current target
+    pub combat_damage: i32,
+    /// Whether this enemy has acted this turn
+    pub acted_this_turn: bool,
+    /// Number of turns alive
+    pub turns_alive: u32,
+    /// Spawn room index (for territorial behavior)
+    pub spawn_room: Option<usize>,
+}
+
+/// Global counter for generating unique enemy IDs
+static ENEMY_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Generate a unique enemy ID
+pub fn generate_enemy_id() -> u64 {
+    ENEMY_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }
 
 impl Enemy {
-    /// Create a new enemy
+    /// Create a new enemy with autonomous AI
     pub fn new(x: usize, y: usize, kind: EnemyKind, level: u32) -> Self {
         let (base_hp, base_atk, base_def, base_xp) = kind.base_stats();
         let scale = 1.0 + (level as f32 * 0.1);
         let hp = (base_hp as f32 * scale) as i32;
+
+        // Calculate speed based on enemy type
+        let base_speed = match kind {
+            // Fast enemies
+            EnemyKind::Bat | EnemyKind::Wolf | EnemyKind::DireWolf
+            | EnemyKind::GiantWasp | EnemyKind::FrostWolf => 14,
+            // Normal speed
+            EnemyKind::Goblin | EnemyKind::Skeleton | EnemyKind::Spider
+            | EnemyKind::Orc | EnemyKind::Vampire => 10,
+            // Slow enemies
+            EnemyKind::Troll | EnemyKind::Golem | EnemyKind::LavaGolem
+            | EnemyKind::CaveOgre | EnemyKind::BoneGolem => 6,
+            // Very slow
+            EnemyKind::Slime | EnemyKind::RockElemental | EnemyKind::CursedStatue => 4,
+            // Default
+            _ => 8,
+        };
+
+        let mut ai = EntityAI::for_enemy(kind);
+        ai.base_speed = base_speed;
+        ai.home_pos = Some((x, y));
+
         Self {
+            id: generate_enemy_id(),
             x,
             y,
             kind,
@@ -730,8 +1388,292 @@ impl Enemy {
             attack: (base_atk as f32 * scale) as i32,
             defense: (base_def as f32 * scale) as i32,
             xp_value: (base_xp as f32 * scale) as u32,
+            speed: base_speed,
             status_effects: HashMap::new(),
             last_seen_player: None,
+            ai,
+            current_target: None,
+            combat_damage: 0,
+            acted_this_turn: false,
+            turns_alive: 0,
+            spawn_room: None,
+        }
+    }
+
+    /// Create an enemy with a specific room assignment
+    pub fn new_in_room(x: usize, y: usize, kind: EnemyKind, level: u32, room_idx: usize) -> Self {
+        let mut enemy = Self::new(x, y, kind, level);
+        enemy.spawn_room = Some(room_idx);
+
+        // Set territory for territorial creatures
+        if kind.is_territorial() {
+            enemy.ai.movement = MovementPattern::new_territory(x, y, 8);
+            enemy.ai.behavior = EntityBehavior::Territorial;
+        }
+
+        enemy
+    }
+
+    /// Update the AI state based on game conditions
+    pub fn update_ai(&mut self, can_see_player: bool, player_pos: Option<(usize, usize)>) {
+        let player_dist = if let Some((px, py)) = player_pos {
+            let dx = self.x as f32 - px as f32;
+            let dy = self.y as f32 - py as f32;
+            (dx * dx + dy * dy).sqrt()
+        } else {
+            f32::MAX
+        };
+
+        let hp_percent = self.hp as f32 / self.max_hp as f32;
+
+        // Track player position
+        if can_see_player {
+            if let Some(pos) = player_pos {
+                self.last_seen_player = Some(pos);
+                self.ai.last_seen_player = Some(pos);
+            }
+        }
+
+        self.ai.update_behavior(can_see_player, player_dist, hp_percent);
+        self.ai.tick_action_points();
+        self.ai.decay_interests();
+        self.turns_alive += 1;
+    }
+
+    /// Decide what action to take autonomously
+    pub fn decide_action(&self, enemies: &[Enemy], player_pos: (usize, usize), map_visible: &[[bool; 100]; 45]) -> EntityAction {
+        // Check if stunned or frozen
+        if self.has_status(StatusEffect::Stun) || self.has_status(StatusEffect::Freeze) {
+            return EntityAction::Wait;
+        }
+
+        match self.ai.behavior {
+            EntityBehavior::Hunt => self.hunt_action(player_pos),
+            EntityBehavior::Flee => self.flee_action(player_pos),
+            EntityBehavior::Patrol => self.patrol_action(),
+            EntityBehavior::Wander => self.wander_action(),
+            EntityBehavior::Guard => self.guard_action(player_pos),
+            EntityBehavior::Territorial => self.territorial_action(enemies, player_pos),
+            EntityBehavior::Combat => self.combat_action(enemies),
+            EntityBehavior::Investigate => self.investigate_action(),
+            EntityBehavior::Sleep => {
+                // Wake up if player nearby
+                let dx = (self.x as i32 - player_pos.0 as i32).abs();
+                let dy = (self.y as i32 - player_pos.1 as i32).abs();
+                if dx <= 3 && dy <= 3 {
+                    EntityAction::Wait // Wake up next turn
+                } else {
+                    EntityAction::Rest
+                }
+            }
+            _ => EntityAction::Wait,
+        }
+    }
+
+    fn hunt_action(&self, player_pos: (usize, usize)) -> EntityAction {
+        let dx = player_pos.0 as i32 - self.x as i32;
+        let dy = player_pos.1 as i32 - self.y as i32;
+
+        // If adjacent, attack
+        if dx.abs() <= 1 && dy.abs() <= 1 {
+            return EntityAction::Attack(player_pos.0, player_pos.1);
+        }
+
+        // Move towards player
+        EntityAction::Move(dx.signum(), dy.signum())
+    }
+
+    fn flee_action(&self, player_pos: (usize, usize)) -> EntityAction {
+        let dx = self.x as i32 - player_pos.0 as i32;
+        let dy = self.y as i32 - player_pos.1 as i32;
+
+        // Move away from player
+        EntityAction::Move(dx.signum(), dy.signum())
+    }
+
+    fn patrol_action(&self) -> EntityAction {
+        match &self.ai.movement {
+            MovementPattern::Patrol { waypoints, current_idx, .. } => {
+                if waypoints.is_empty() {
+                    return EntityAction::Wait;
+                }
+                let (tx, ty) = waypoints[*current_idx];
+                let dx = tx as i32 - self.x as i32;
+                let dy = ty as i32 - self.y as i32;
+
+                if dx == 0 && dy == 0 {
+                    EntityAction::PatrolNext
+                } else {
+                    EntityAction::Move(dx.signum(), dy.signum())
+                }
+            }
+            _ => self.wander_action(),
+        }
+    }
+
+    fn wander_action(&self) -> EntityAction {
+        // Random movement
+        let mut rng = rand::thread_rng();
+        let dx = rng.gen_range(-1..=1);
+        let dy = rng.gen_range(-1..=1);
+        if dx == 0 && dy == 0 {
+            EntityAction::Wait
+        } else {
+            EntityAction::Move(dx, dy)
+        }
+    }
+
+    fn guard_action(&self, player_pos: (usize, usize)) -> EntityAction {
+        let dx = player_pos.0 as i32 - self.x as i32;
+        let dy = player_pos.1 as i32 - self.y as i32;
+        let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+        // Attack if player in range
+        if dist <= self.ai.aggro_range as f32 {
+            if dx.abs() <= 1 && dy.abs() <= 1 {
+                return EntityAction::Attack(player_pos.0, player_pos.1);
+            }
+            return EntityAction::Move(dx.signum(), dy.signum());
+        }
+
+        // Return to guard position
+        if let Some((hx, hy)) = self.ai.home_pos {
+            if self.x != hx || self.y != hy {
+                let dx = hx as i32 - self.x as i32;
+                let dy = hy as i32 - self.y as i32;
+                return EntityAction::Move(dx.signum(), dy.signum());
+            }
+        }
+
+        EntityAction::Guard
+    }
+
+    fn territorial_action(&self, enemies: &[Enemy], player_pos: (usize, usize)) -> EntityAction {
+        // Check for intruding enemies of different faction
+        for other in enemies {
+            if other.id == self.id || !other.is_alive() {
+                continue;
+            }
+
+            let other_faction = other.kind.faction();
+            let disposition = self.kind.faction().disposition_towards(&other_faction);
+
+            if disposition == EntityDisposition::Hostile {
+                let dx = other.x as i32 - self.x as i32;
+                let dy = other.y as i32 - self.y as i32;
+                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+                // Attack intruder if in territory
+                if let MovementPattern::Territory { center_x, center_y, radius } = &self.ai.movement {
+                    let other_in_territory = {
+                        let odx = other.x as i32 - *center_x as i32;
+                        let ody = other.y as i32 - *center_y as i32;
+                        ((odx * odx + ody * ody) as f32).sqrt() <= *radius as f32
+                    };
+
+                    if other_in_territory && dist < 10.0 {
+                        if dx.abs() <= 1 && dy.abs() <= 1 {
+                            return EntityAction::Attack(other.x, other.y);
+                        }
+                        return EntityAction::Move(dx.signum(), dy.signum());
+                    }
+                }
+            }
+        }
+
+        // Default to guarding
+        self.guard_action(player_pos)
+    }
+
+    fn combat_action(&self, enemies: &[Enemy]) -> EntityAction {
+        if let Some(target_id) = self.current_target {
+            if let Some(target) = enemies.iter().find(|e| e.id == target_id && e.is_alive()) {
+                let dx = target.x as i32 - self.x as i32;
+                let dy = target.y as i32 - self.y as i32;
+
+                if dx.abs() <= 1 && dy.abs() <= 1 {
+                    return EntityAction::Attack(target.x, target.y);
+                }
+                return EntityAction::Move(dx.signum(), dy.signum());
+            }
+        }
+        EntityAction::Wait
+    }
+
+    fn investigate_action(&self) -> EntityAction {
+        if let Some((ix, iy)) = self.ai.get_top_interest() {
+            let dx = ix as i32 - self.x as i32;
+            let dy = iy as i32 - self.y as i32;
+
+            if dx == 0 && dy == 0 {
+                // Reached the point, remove interest
+                return EntityAction::Wait;
+            }
+
+            return EntityAction::Move(dx.signum(), dy.signum());
+        }
+        EntityAction::Wait
+    }
+
+    /// Process the enemy attacking another enemy
+    pub fn attack_enemy(&mut self, target: &mut Enemy, rng: &mut impl Rng) -> EntityInteractionResult {
+        let mut result = EntityInteractionResult::default();
+
+        let damage = (self.attack - target.defense).max(1);
+        target.hp -= damage;
+
+        result.damage_dealt = Some((target.id, damage));
+        result.messages.push(format!("{} attacks {} for {} damage!",
+            self.kind.name(), target.kind.name(), damage));
+
+        // Apply status effects based on attacker type
+        if self.kind.can_poison() && rng.gen_bool(0.2) {
+            target.add_status(StatusEffect::Poison, 3);
+            result.status_applied = Some((target.id, StatusEffect::Poison, 3));
+        }
+        if self.kind.can_burn() && rng.gen_bool(0.2) {
+            target.add_status(StatusEffect::Burn, 3);
+            result.status_applied = Some((target.id, StatusEffect::Burn, 3));
+        }
+        if self.kind.can_freeze() && rng.gen_bool(0.15) {
+            target.add_status(StatusEffect::Freeze, 2);
+            result.status_applied = Some((target.id, StatusEffect::Freeze, 2));
+        }
+
+        // Make combat noise
+        result.sound_made = Some((self.x, self.y, 8));
+
+        // Check if target died
+        if !target.is_alive() {
+            result.entity_died = Some(target.id);
+            result.messages.push(format!("{} has been slain!", target.kind.name()));
+        }
+
+        result
+    }
+
+    /// Advance patrol to next waypoint
+    pub fn advance_patrol(&mut self) {
+        if let MovementPattern::Patrol { waypoints, current_idx, reverse } = &mut self.ai.movement {
+            if waypoints.is_empty() {
+                return;
+            }
+
+            if *reverse {
+                if *current_idx == 0 {
+                    *reverse = false;
+                    *current_idx = 1.min(waypoints.len() - 1);
+                } else {
+                    *current_idx -= 1;
+                }
+            } else {
+                if *current_idx >= waypoints.len() - 1 {
+                    *reverse = true;
+                    *current_idx = waypoints.len().saturating_sub(2);
+                } else {
+                    *current_idx += 1;
+                }
+            }
         }
     }
 
