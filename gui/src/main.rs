@@ -10,8 +10,8 @@
 
 mod particles;
 
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Rounding, Sense, Stroke, Vec2};
-use shadowcrypt_core::ai::{AIAction, AutoPlayAI};
+use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Rounding, Sense, Stroke, StrokeKind, Vec2};
+use shadowcrypt_core::ai::{AIAction, AutoPlayConfig, AutoPlayer};
 use shadowcrypt_core::classes::CharacterClass;
 use shadowcrypt_core::combat::StatusEffect;
 use shadowcrypt_core::items::{EquipSlot, ItemKind, Rarity};
@@ -152,12 +152,13 @@ fn draw_panel_frame(painter: &egui::Painter, rect: Rect, title: Option<&str>) {
     painter.rect_filled(shadow_rect, Rounding::same(4), Color32::from_rgba_unmultiplied(0, 0, 0, 40));
 
     // Border with subtle highlight
-    painter.rect_stroke(rect, Rounding::same(4), Stroke::new(1.0, ThemeColors::BORDER_DARK));
+    painter.rect_stroke(rect, Rounding::same(4), Stroke::new(1.0, ThemeColors::BORDER_DARK), StrokeKind::Outside);
     let inner_rect = rect.shrink(1.0);
     painter.rect_stroke(
         Rect::from_min_max(inner_rect.min, Pos2::new(inner_rect.max.x, inner_rect.min.y + 1.0)),
         Rounding::ZERO,
         Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 10)),
+        StrokeKind::Outside,
     );
 
     // Title bar if provided
@@ -226,14 +227,14 @@ fn draw_gradient_bar(
     }
 
     // Border
-    painter.rect_stroke(rect, Rounding::same(3), Stroke::new(1.0, ThemeColors::BORDER_DARK));
+    painter.rect_stroke(rect, Rounding::same(3), Stroke::new(1.0, ThemeColors::BORDER_DARK), StrokeKind::Outside);
 }
 
 /// Draw character portrait placeholder
 fn draw_character_portrait(painter: &egui::Painter, rect: Rect, class: CharacterClass) {
     // Frame
     painter.rect_filled(rect, Rounding::same(4), ThemeColors::BACKGROUND_DARK);
-    painter.rect_stroke(rect, Rounding::same(4), Stroke::new(2.0, ThemeColors::ACCENT_GOLD));
+    painter.rect_stroke(rect, Rounding::same(4), Stroke::new(2.0, ThemeColors::ACCENT_GOLD), StrokeKind::Outside);
 
     // Class icon/symbol
     let symbol = match class {
@@ -243,6 +244,8 @@ fn draw_character_portrait(painter: &egui::Painter, rect: Rect, class: Character
         CharacterClass::Paladin => "P",
         CharacterClass::Ranger => "A",
         CharacterClass::Necromancer => "N",
+        CharacterClass::Cleric => "C",
+        CharacterClass::Monk => "K",
     };
 
     let color = match class {
@@ -252,6 +255,8 @@ fn draw_character_portrait(painter: &egui::Painter, rect: Rect, class: Character
         CharacterClass::Paladin => Color32::from_rgb(255, 220, 100),
         CharacterClass::Ranger => Color32::from_rgb(120, 180, 80),
         CharacterClass::Necromancer => Color32::from_rgb(150, 80, 180),
+        CharacterClass::Cleric => Color32::from_rgb(220, 220, 140),
+        CharacterClass::Monk => Color32::from_rgb(200, 160, 100),
     };
 
     painter.text(
@@ -294,7 +299,7 @@ fn draw_equipment_slot(
     } else {
         ThemeColors::BORDER_DARK
     };
-    painter.rect_stroke(rect, Rounding::same(3), Stroke::new(1.0, border_color));
+    painter.rect_stroke(rect, Rounding::same(3), Stroke::new(1.0, border_color), StrokeKind::Outside);
 
     if let Some(item) = item {
         // Item rarity glow
@@ -307,12 +312,11 @@ fn draw_equipment_slot(
 
         // Item icon
         let icon = match item.kind {
-            ItemKind::Weapon(_) => "W",
-            ItemKind::Armor => "A",
-            ItemKind::Shield => "S",
-            ItemKind::Helmet => "H",
-            ItemKind::Boots => "B",
-            ItemKind::Gloves => "G",
+            ItemKind::HealthPotion | ItemKind::ManaPotion | ItemKind::StrengthPotion |
+            ItemKind::DefensePotion | ItemKind::SpeedPotion | ItemKind::RegenerationPotion |
+            ItemKind::FullRestorePotion | ItemKind::CureAllPotion => "P",
+            ItemKind::ScrollTeleport | ItemKind::ScrollFireball | ItemKind::ScrollIdentify |
+            ItemKind::ScrollEnchant => "S",
             _ => "?",
         };
         painter.text(
@@ -331,7 +335,7 @@ fn draw_equipment_slot(
             EquipSlot::Helmet => "H",
             EquipSlot::Boots => "B",
             EquipSlot::Gloves => "G",
-            EquipSlot::Ring => "R",
+            EquipSlot::Ring1 | EquipSlot::Ring2 => "R",
             EquipSlot::Amulet => "N",
         };
         painter.text(
@@ -761,7 +765,7 @@ impl Minimap {
 
         // Background
         painter.rect_filled(minimap_rect, Rounding::same(4), Color32::from_rgba_unmultiplied(5, 5, 10, 220));
-        painter.rect_stroke(minimap_rect, Rounding::same(4), Stroke::new(1.0, ThemeColors::BORDER_LIGHT));
+        painter.rect_stroke(minimap_rect, Rounding::same(4), Stroke::new(1.0, ThemeColors::BORDER_LIGHT), StrokeKind::Outside);
 
         // Draw tiles
         for y in 0..MAP_HEIGHT {
@@ -802,7 +806,7 @@ impl Minimap {
             for enemy in state.enemies.iter().filter(|e| e.is_alive() && state.map.visible[e.y][e.x]) {
                 let dot_pos = Pos2::new(pos.x + enemy.x as f32 * self.zoom + self.zoom * 0.5,
                                         pos.y + enemy.y as f32 * self.zoom + self.zoom * 0.5);
-                let color = if enemy.is_boss { Color32::from_rgb(255, 50, 200) } else { Color32::from_rgb(200, 60, 60) };
+                let color = if enemy.kind.is_boss() { Color32::from_rgb(255, 50, 200) } else { Color32::from_rgb(200, 60, 60) };
                 painter.circle_filled(dot_pos, (self.zoom * 0.5).max(2.0), color);
             }
         }
@@ -933,7 +937,7 @@ struct ShadowCryptApp {
     state: Option<GameState>,
     app_state: AppState,
     auto_play: bool,
-    auto_ai: AutoPlayAI,
+    auto_ai: AutoPlayer,
     last_update: std::time::Instant,
     lighting: LightingSystem,
     settings: Settings,
@@ -961,7 +965,7 @@ impl Default for ShadowCryptApp {
             state: None,
             app_state: AppState::Loading { progress: 0.0, message: "Initializing...".to_string() },
             auto_play: false,
-            auto_ai: AutoPlayAI::new(),
+            auto_ai: AutoPlayer::new(AutoPlayConfig::default()),
             last_update: std::time::Instant::now(),
             lighting: LightingSystem::new(),
             settings: Settings::default(),
@@ -1116,7 +1120,8 @@ impl ShadowCryptApp {
                             ui.add_space(15.0);
 
                             for class in CharacterClass::all() {
-                                let (hp, atk, def, mana, _spd) = class.base_stats();
+                                let stats = class.base_stats();
+                                let (hp, atk, def, mana) = (stats.hp, stats.attack, stats.defense, stats.mana);
 
                                 let class_color = match class {
                                     CharacterClass::Warrior => Color32::from_rgb(200, 80, 80),
@@ -1125,6 +1130,8 @@ impl ShadowCryptApp {
                                     CharacterClass::Paladin => Color32::from_rgb(255, 220, 100),
                                     CharacterClass::Ranger => Color32::from_rgb(120, 180, 80),
                                     CharacterClass::Necromancer => Color32::from_rgb(150, 80, 180),
+                                    CharacterClass::Cleric => Color32::from_rgb(220, 220, 140),
+                                    CharacterClass::Monk => Color32::from_rgb(200, 160, 100),
                                 };
 
                                 ui.horizontal(|ui| {
@@ -1139,7 +1146,7 @@ impl ShadowCryptApp {
                                     .stroke(Stroke::new(1.0, class_color.gamma_multiply(0.5)));
 
                                     if ui.add(button).clicked() {
-                                        self.start_game(*class);
+                                        self.start_game(class);
                                     }
 
                                     ui.add_space(10.0);
@@ -1242,10 +1249,8 @@ impl ShadowCryptApp {
             if elapsed.as_millis() > self.settings.gameplay.auto_play_speed as u128 {
                 let state = self.state.as_ref().unwrap();
                 let action = self.auto_ai.decide(
-                    state.player.x, state.player.y, state.player.hp, state.player.total_max_hp(),
-                    state.player.mana, state.player.can_use_skill(), &state.map, &state.enemies,
-                    state.player.find_health_potion(), state.player.find_mana_potion(),
-                    state.dungeon_level, state.boss_defeated,
+                    &state.player, &state.enemies, &state.items,
+                    &state.map, state.dungeon_level, state.boss_defeated,
                 );
 
                 let state = self.state.as_mut().unwrap();
@@ -1256,7 +1261,11 @@ impl ShadowCryptApp {
                     AIAction::Descend => state.descend(),
                     AIAction::Ascend => state.ascend(),
                     AIAction::Wait => state.end_turn(),
-                    AIAction::Attack(_, _) => {}
+                    AIAction::Rest => state.end_turn(),
+                    AIAction::Flee(dx, dy) => state.move_player(dx, dy),
+                    AIAction::EquipItem(_) => {},
+                    AIAction::DropItem(_) => {},
+                    AIAction::CycleSkill => {},
                 }
                 self.lighting.set_theme(state.map.theme, state.dungeon_level);
             }
@@ -1469,8 +1478,8 @@ impl ShadowCryptApp {
                                 if response.hovered() {
                                     if let Some(item) = item {
                                         egui::show_tooltip(ui.ctx(), ui.layer_id(), egui::Id::new("equip_tooltip"), |ui| {
-                                            ui.label(RichText::new(&item.name).color(to_egui_color(rarity_color(item.rarity))));
-                                            ui.label(RichText::new(format!("{}", item.kind)).size(11.0).color(ThemeColors::TEXT_DIM));
+                                            ui.label(RichText::new(item.display_name()).color(to_egui_color(rarity_color(item.rarity))));
+                                            ui.label(RichText::new(format!("{:?}", item.kind)).size(11.0).color(ThemeColors::TEXT_DIM));
                                         });
                                     }
                                 }
@@ -1500,6 +1509,9 @@ impl ShadowCryptApp {
             });
 
         // ========== BOTTOM PANEL - ACTION BAR ==========
+        let mut deferred_skill_click: Option<usize> = None;
+        let mut deferred_item_use: Option<usize> = None;
+
         egui::TopBottomPanel::bottom("action_bar")
             .frame(egui::Frame::default()
                 .fill(ThemeColors::BACKGROUND_DARK)
@@ -1546,7 +1558,7 @@ impl ShadowCryptApp {
                             ThemeColors::BORDER_DARK
                         };
                         painter.rect_stroke(icon_rect, Rounding::same(6),
-                            Stroke::new(if is_active { 2.0 } else { 1.0 }, border_color));
+                            Stroke::new(if is_active { 2.0 } else { 1.0 }, border_color), StrokeKind::Outside);
 
                         // Skill letter
                         painter.text(
@@ -1589,14 +1601,9 @@ impl ShadowCryptApp {
                             if has_mana { ThemeColors::MP_FULL } else { ThemeColors::ACCENT_RED },
                         );
 
-                        // Handle click
+                        // Handle click - defer mutation
                         if response.clicked() && can_use {
-                            let skill = state.player.skills[idx];
-                            if let Some(game_state) = &mut self.state {
-                                game_state.player.active_skill = idx;
-                                game_state.use_skill();
-                                self.skill_cooldowns.insert(skill, get_max_cooldown(skill));
-                            }
+                            deferred_skill_click = Some(idx);
                         }
 
                         // Tooltip
@@ -1633,9 +1640,7 @@ impl ShadowCryptApp {
                         let response = ui.add(button);
 
                         if response.clicked() {
-                            if let Some(state) = &mut self.state {
-                                state.use_item(i);
-                            }
+                            deferred_item_use = Some(i);
                         }
 
                         if response.hovered() {
@@ -1654,8 +1659,8 @@ impl ShadowCryptApp {
                     .max_height(35.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            for (msg, color) in state.messages.iter().rev().take(3) {
-                                ui.label(RichText::new(msg).size(11.0).color(to_egui_color(*color)));
+                            for msg in state.messages.iter().rev().take(3) {
+                                ui.label(RichText::new(&msg.text).size(11.0).color(ThemeColors::TEXT_NORMAL));
                                 ui.add_space(15.0);
                             }
                         });
@@ -1793,6 +1798,7 @@ impl ShadowCryptApp {
                                     tile_rect.shrink(2.0),
                                     Rounding::same(2),
                                     Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 60, 60, 100)),
+                                    StrokeKind::Outside,
                                 );
                             }
 
@@ -1858,6 +1864,16 @@ impl ShadowCryptApp {
                 // Draw minimap
                 self.minimap.render(&painter, rect, state, self.lighting.config().fog_color);
             });
+
+        // Process deferred actions from UI clicks
+        if let Some(skill_idx) = deferred_skill_click {
+            self.activate_skill_by_index(skill_idx);
+        }
+        if let Some(item_idx) = deferred_item_use {
+            if let Some(state) = &mut self.state {
+                state.use_item(item_idx);
+            }
+        }
 
         // ========== POPUP WINDOWS ==========
         self.render_windows(ctx);
@@ -1975,6 +1991,8 @@ impl ShadowCryptApp {
                     .stroke(Stroke::new(1.0, ThemeColors::BORDER_LIGHT))
                     .rounding(Rounding::same(8)))
                 .show(ctx, |ui| {
+                    let mut use_item_idx: Option<usize> = None;
+
                     if let Some(state) = &self.state {
                         ui.label(RichText::new(format!("Items: {}/20", state.player.inventory.len()))
                             .color(ThemeColors::TEXT_DIM));
@@ -1988,13 +2006,17 @@ impl ShadowCryptApp {
                                         .size(11.0).color(ThemeColors::TEXT_MUTED));
 
                                     if ui.button(RichText::new(item.display_name()).color(item_color)).clicked() {
-                                        if let Some(state) = &mut self.state {
-                                            state.use_item(i);
-                                        }
+                                        use_item_idx = Some(i);
                                     }
                                 });
                             }
                         });
+                    }
+
+                    if let Some(idx) = use_item_idx {
+                        if let Some(state) = &mut self.state {
+                            state.use_item(idx);
+                        }
                     }
 
                     ui.add_space(10.0);
@@ -2073,7 +2095,7 @@ impl ShadowCryptApp {
             if i.key_pressed(egui::Key::M) {
                 self.minimap.toggle();
             }
-            if i.key_pressed(egui::Key::PlusEquals) {
+            if i.key_pressed(egui::Key::Plus) {
                 self.minimap.zoom_in();
             }
             if i.key_pressed(egui::Key::Minus) {
@@ -2119,10 +2141,17 @@ impl ShadowCryptApp {
                 }
                 if i.key_pressed(egui::Key::Tab) { state.cycle_skill(); }
 
-                if i.key_pressed(egui::Key::F1) { self.activate_skill_by_index(0); }
-                if i.key_pressed(egui::Key::F2) { self.activate_skill_by_index(1); }
-                if i.key_pressed(egui::Key::F3) { self.activate_skill_by_index(2); }
-                if i.key_pressed(egui::Key::F4) { self.activate_skill_by_index(3); }
+                for (fkey, skill_idx) in [(egui::Key::F1, 0), (egui::Key::F2, 1), (egui::Key::F3, 2), (egui::Key::F4, 3)] {
+                    if i.key_pressed(fkey) && skill_idx < state.player.skills.len() {
+                        let skill = state.player.skills[skill_idx];
+                        let cooldown = *self.skill_cooldowns.get(&skill).unwrap_or(&0);
+                        if cooldown == 0 && state.player.mana >= skill.mana_cost() {
+                            state.player.active_skill = skill_idx;
+                            state.use_skill();
+                            self.skill_cooldowns.insert(skill, get_max_cooldown(skill));
+                        }
+                    }
+                }
 
                 // Stairs
                 if i.key_pressed(egui::Key::Period) {
@@ -2160,7 +2189,12 @@ impl ShadowCryptApp {
     }
 
     fn render_game_over(&mut self, ctx: &egui::Context) {
-        let state = self.state.as_ref().unwrap();
+        let class_name = self.state.as_ref().unwrap().player.class.name().to_string();
+        let level = self.state.as_ref().unwrap().player.level;
+        let dungeon_level = self.state.as_ref().unwrap().dungeon_level;
+        let gold = self.state.as_ref().unwrap().player.gold;
+        let kills = self.state.as_ref().unwrap().player.kills;
+        let turn_count = self.state.as_ref().unwrap().turn_count;
 
         egui::CentralPanel::default()
             .frame(egui::Frame::default().fill(Color32::from_rgb(15, 8, 8)))
@@ -2190,17 +2224,17 @@ impl ShadowCryptApp {
                         .show(ui, |ui| {
                             ui.label(RichText::new("Final Record").size(18.0).color(ThemeColors::ACCENT_GOLD));
                             ui.separator();
-                            ui.label(RichText::new(format!("Class: {}", state.player.class.name()))
+                            ui.label(RichText::new(format!("Class: {}", class_name))
                                 .color(ThemeColors::TEXT_NORMAL));
-                            ui.label(RichText::new(format!("Level: {}", state.player.level))
+                            ui.label(RichText::new(format!("Level: {}", level))
                                 .color(ThemeColors::TEXT_NORMAL));
-                            ui.label(RichText::new(format!("Floor Reached: {}", state.dungeon_level))
+                            ui.label(RichText::new(format!("Floor Reached: {}", dungeon_level))
                                 .color(ThemeColors::TEXT_NORMAL));
-                            ui.label(RichText::new(format!("Gold Collected: {}", state.player.gold))
+                            ui.label(RichText::new(format!("Gold Collected: {}", gold))
                                 .color(ThemeColors::ACCENT_GOLD));
-                            ui.label(RichText::new(format!("Enemies Slain: {}", state.player.kills))
+                            ui.label(RichText::new(format!("Enemies Slain: {}", kills))
                                 .color(ThemeColors::ACCENT_RED));
-                            ui.label(RichText::new(format!("Turns Survived: {}", state.turn_count))
+                            ui.label(RichText::new(format!("Turns Survived: {}", turn_count))
                                 .color(ThemeColors::TEXT_DIM));
                         });
 
@@ -2216,7 +2250,11 @@ impl ShadowCryptApp {
     }
 
     fn render_victory(&mut self, ctx: &egui::Context) {
-        let state = self.state.as_ref().unwrap();
+        let class_name = self.state.as_ref().unwrap().player.class.name().to_string();
+        let level = self.state.as_ref().unwrap().player.level;
+        let gold = self.state.as_ref().unwrap().player.gold;
+        let kills = self.state.as_ref().unwrap().player.kills;
+        let turn_count = self.state.as_ref().unwrap().turn_count;
 
         egui::CentralPanel::default()
             .frame(egui::Frame::default().fill(Color32::from_rgb(12, 15, 20)))
@@ -2251,15 +2289,15 @@ impl ShadowCryptApp {
                             ui.separator();
                             ui.add_space(10.0);
 
-                            ui.label(RichText::new(format!("Hero Class: {}", state.player.class.name()))
+                            ui.label(RichText::new(format!("Hero Class: {}", class_name))
                                 .size(14.0).color(ThemeColors::TEXT_BRIGHT));
-                            ui.label(RichText::new(format!("Final Level: {}", state.player.level))
+                            ui.label(RichText::new(format!("Final Level: {}", level))
                                 .size(14.0).color(ThemeColors::ACCENT_GREEN));
-                            ui.label(RichText::new(format!("Gold Amassed: {}", state.player.gold))
+                            ui.label(RichText::new(format!("Gold Amassed: {}", gold))
                                 .size(14.0).color(ThemeColors::ACCENT_GOLD));
-                            ui.label(RichText::new(format!("Foes Defeated: {}", state.player.kills))
+                            ui.label(RichText::new(format!("Foes Defeated: {}", kills))
                                 .size(14.0).color(ThemeColors::ACCENT_RED));
-                            ui.label(RichText::new(format!("Journey Duration: {} turns", state.turn_count))
+                            ui.label(RichText::new(format!("Journey Duration: {} turns", turn_count))
                                 .size(14.0).color(ThemeColors::TEXT_DIM));
                         });
 

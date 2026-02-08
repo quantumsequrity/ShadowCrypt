@@ -1936,6 +1936,7 @@ fn enemy_glyph(kind: &EnemyKind) -> char {
         EnemyKind::AncientWyrm => 'W',
         EnemyKind::FrostLord => 'F',
         EnemyKind::InfernalLord => 'I',
+        _ => '?',
     }
 }
 
@@ -2035,6 +2036,7 @@ fn enemy_color(kind: &EnemyKind) -> Color {
         EnemyKind::AncientWyrm => Color::Yellow,
         EnemyKind::FrostLord => Color::Cyan,
         EnemyKind::InfernalLord => Color::Red,
+        _ => Color::White,
     }
 }
 

@@ -127,16 +127,20 @@ impl MultiAgentGame {
         self.agents.process_turn();
 
         // Process communications
-        let messages = self.agents.message_bus.recent_messages(5);
-        for msg in messages.iter() {
-            let from_name = self.agents.get(msg.from)
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "Unknown".to_string());
-            let to_name = self.agents.get(msg.to)
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            self.add_comm(format!("{} -> {}: {}", from_name, to_name, msg.content));
+        let comm_strings: Vec<String> = {
+            let messages = self.agents.message_bus.recent_messages(5);
+            messages.iter().map(|msg| {
+                let from_name = self.agents.get(msg.from)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let to_name = self.agents.get(msg.to)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                format!("{} -> {}: {}", from_name, to_name, msg.content)
+            }).collect()
+        };
+        for s in comm_strings {
+            self.add_comm(s);
         }
 
         // Periodic messages
