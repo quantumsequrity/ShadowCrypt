@@ -1,6 +1,6 @@
 //! Species and Subspecies System
 //!
-//! Comprehensive race system with 12 major species and 48+ subspecies,
+//! Comprehensive race system with 12 major species and 73+ subspecies,
 //! each with unique traits, abilities, and stat modifiers.
 
 use serde::{Deserialize, Serialize};
@@ -69,52 +69,58 @@ impl Species {
     pub fn subspecies(&self) -> &'static [Subspecies] {
         match self {
             Self::Human => &[
-                Subspecies::Highlander, Subspecies::Lowlander, Subspecies::Islander,
-                Subspecies::Nomad, Subspecies::Imperial,
+                Subspecies::Noble, Subspecies::Commoner, Subspecies::Barbarian,
+                Subspecies::Islander, Subspecies::Northerner, Subspecies::Southerner,
+                Subspecies::Imperial, Subspecies::Nomad,
             ],
             Self::Elf => &[
                 Subspecies::HighElf, Subspecies::WoodElf, Subspecies::DarkElf,
-                Subspecies::SeaElf, Subspecies::BloodElf,
+                Subspecies::SeaElf, Subspecies::BloodElf, Subspecies::MoonElf,
+                Subspecies::SunElf, Subspecies::WildElf,
             ],
             Self::Dwarf => &[
-                Subspecies::MountainDwarf, Subspecies::HillDwarf, Subspecies::DeepDwarf,
-                Subspecies::ForgeDwarf, Subspecies::FrostDwarf,
+                Subspecies::Mountain, Subspecies::Hill, Subspecies::Deep,
+                Subspecies::Frost, Subspecies::GoldDwarf, Subspecies::IronDwarf,
+                Subspecies::RuneDwarf, Subspecies::FireDwarf,
             ],
             Self::Orc => &[
-                Subspecies::GreyOrc, Subspecies::BlackOrc, Subspecies::BloodOrc,
-                Subspecies::ShamanOrc, Subspecies::IronOrc,
+                Subspecies::Green, Subspecies::Grey, Subspecies::Black,
+                Subspecies::HalfOrc,
             ],
             Self::Undead => &[
-                Subspecies::Skeleton, Subspecies::Zombie, Subspecies::Ghoul,
+                Subspecies::Skeleton, Subspecies::Zombie, Subspecies::Ghost,
                 Subspecies::Vampire, Subspecies::Lich,
             ],
             Self::Demon => &[
-                Subspecies::Imp, Subspecies::Succubus, Subspecies::Hellspawn,
-                Subspecies::ShadowFiend, Subspecies::ArchDemon,
+                Subspecies::Imp, Subspecies::Succubus, Subspecies::PitFiend,
+                Subspecies::Balor,
             ],
             Self::Beastkin => &[
-                Subspecies::Wolfkin, Subspecies::Catfolk, Subspecies::Bearkin,
-                Subspecies::Ratling, Subspecies::Serpentine,
+                Subspecies::Wolf, Subspecies::Cat, Subspecies::Bear,
+                Subspecies::Fox, Subspecies::Rabbit,
             ],
             Self::Dragonborn => &[
                 Subspecies::FireDrake, Subspecies::IceDrake, Subspecies::StormDrake,
-                Subspecies::ShadowDrake, Subspecies::GoldenDrake,
+                Subspecies::ShadowDrake, Subspecies::Drake, Subspecies::Wyrm,
+                Subspecies::TrueDragon, Subspecies::ElderDragon, Subspecies::DragonGod,
             ],
             Self::Fae => &[
                 Subspecies::Pixie, Subspecies::Sprite, Subspecies::Dryad,
-                Subspecies::Wisp, Subspecies::Changeling,
+                Subspecies::Nymph, Subspecies::Sylph, Subspecies::WillOWisp,
+                Subspecies::DarkFairy, Subspecies::Leprechaun,
             ],
             Self::Construct => &[
                 Subspecies::Golem, Subspecies::Automaton, Subspecies::Warforged,
-                Subspecies::Homunculus, Subspecies::ClockworkKnight,
+                Subspecies::Clockwork,
             ],
             Self::Elemental => &[
-                Subspecies::Flameling, Subspecies::Tideling, Subspecies::Stoneling,
-                Subspecies::Windling, Subspecies::Voidling,
+                Subspecies::Fire, Subspecies::Water, Subspecies::Earth,
+                Subspecies::Air,
             ],
             Self::Celestial => &[
-                Subspecies::Aasimar, Subspecies::Nephilim, Subspecies::Seraphim,
-                Subspecies::Valkyrie, Subspecies::Archon,
+                Subspecies::Angel, Subspecies::Seraph, Subspecies::Archon,
+                Subspecies::Nephilim, Subspecies::Cherub, Subspecies::Throne,
+                Subspecies::Dominion, Subspecies::Virtue,
             ],
         }
     }
@@ -198,359 +204,431 @@ impl Species {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Subspecies {
     // Human subspecies
-    Highlander,   // Mountain warriors, +defense
-    Lowlander,    // Plains dwellers, balanced
+    Noble,        // High status, +leadership
+    Commoner,     // Balanced, +xp gain
+    Barbarian,    // Wild, +combat stats
     Islander,     // Sea-faring, +speed
-    Nomad,        // Desert wanderers, +stamina
-    Imperial,     // Noble blood, +charisma
 
     // Elf subspecies
     HighElf,      // Arcane masters, +mana
-    WoodElf,      // Forest dwellers, +speed, +stealth
-    DarkElf,      // Underground, +dark magic
+    WoodElf,      // Forest dwellers, +speed
+    DarkElf,      // Underground, +stealth
     SeaElf,       // Aquatic, water breathing
-    BloodElf,     // Magic addicts, mana leech
 
     // Dwarf subspecies
-    MountainDwarf, // Traditional, +defense
-    HillDwarf,     // Surface dwellers, +hp
-    DeepDwarf,     // Underdark, darkvision
-    ForgeDwarf,    // Smiths, +crafting
-    FrostDwarf,    // Ice mountains, cold resist
+    Mountain,     // Traditional, +defense
+    Hill,         // Surface dwellers, +hp
+    Deep,         // Underdark, darkvision
+    Frost,        // Ice mountains, cold resist
 
     // Orc subspecies
-    GreyOrc,      // Common, balanced
-    BlackOrc,     // Elite warriors, +attack
-    BloodOrc,     // Berserkers, +damage when hurt
-    ShamanOrc,    // Magic users, +mana
-    IronOrc,      // Heavy armor, +defense
+    Green,        // Common, balanced
+    Grey,         // Cunning, +defense
+    Black,        // Elite warriors, +attack
+    HalfOrc,      // Human heritage, +versatility
 
     // Undead subspecies
     Skeleton,     // Basic, immune to bleed
     Zombie,       // Tough, +hp, slow
-    Ghoul,        // Fast, paralysis touch
+    Ghost,        // Ethereal, dodge chance
     Vampire,      // Life drain, sun weakness
     Lich,         // Powerful mage, phylactery
 
     // Demon subspecies
     Imp,          // Small, fast, trickster
     Succubus,     // Charmer, life drain
-    Hellspawn,    // Fire demon, burn attacks
-    ShadowFiend,  // Shadow magic, stealth
-    ArchDemon,    // Powerful, all demon abilities
+    PitFiend,     // Commander, +leadership
+    Balor,        // Fire demon, burn attacks
 
     // Beastkin subspecies
-    Wolfkin,      // Pack tactics, tracking
-    Catfolk,      // Agile, night vision
-    Bearkin,      // Strong, rage ability
-    Ratling,      // Sneaky, disease resist
-    Serpentine,   // Poison, flexible
+    Wolf,         // Pack tactics, tracking
+    Cat,          // Agile, night vision
+    Bear,         // Strong, rage ability
+    Fox,          // Cunning, +intelligence
+    Rabbit,       // Fast, +evasion
 
     // Dragonborn subspecies
     FireDrake,    // Fire breath, fire resist
     IceDrake,     // Ice breath, cold resist
     StormDrake,   // Lightning breath, storm resist
     ShadowDrake,  // Shadow breath, stealth
-    GoldenDrake,  // Radiant breath, charisma
 
     // Fae subspecies
     Pixie,        // Tiny, flying, illusions
     Sprite,       // Nature magic, healing
     Dryad,        // Tree-bound, plant control
-    Wisp,         // Ethereal, phase through walls
-    Changeling,   // Shapeshifter, mimic
+    Nymph,        // Water/nature, charm
 
     // Construct subspecies
     Golem,        // Stone/clay, high defense
     Automaton,    // Metal, balanced
     Warforged,    // Battle construct, weapons
-    Homunculus,   // Small, familiar bond
-    ClockworkKnight, // Mechanical, precision
+    Clockwork,    // Precision, +accuracy
 
     // Elemental subspecies
-    Flameling,    // Fire elemental
-    Tideling,     // Water elemental
-    Stoneling,    // Earth elemental
-    Windling,     // Air elemental
-    Voidling,     // Void/dark elemental
+    Fire,         // Fire elemental
+    Water,        // Water elemental
+    Earth,        // Earth elemental
+    Air,          // Air elemental
 
     // Celestial subspecies
-    Aasimar,      // Human-angel hybrid
-    Nephilim,     // Fallen angel offspring
-    Seraphim,     // Pure angel form
-    Valkyrie,     // Warrior angel
-    Archon,       // Justice incarnate
+    Angel,        // Divine messenger
+    Seraph,       // Burning one, fire/holy
+    Archon,       // Law incarnate
+    Nephilim,     // Half-mortal, +stats
+    Cherub,       // Guardian spirit, +defense
+    Throne,       // Seat of power, +leadership
+    Dominion,     // Authority incarnate, +attack
+    Virtue,       // Embodiment of good, +healing
+
+    // Additional Elf subspecies
+    BloodElf,     // Mana-addicted, +mana drain
+    MoonElf,      // Lunar magic, +night power
+    SunElf,       // Solar magic, +day power
+    WildElf,      // Feral, +survival
+
+    // Additional Dwarf subspecies
+    GoldDwarf,    // Wealthy, +trade
+    IronDwarf,    // Metalworkers, +crafting
+    RuneDwarf,    // Runic magic, +enchanting
+    FireDwarf,    // Volcanic, +fire resist
+
+    // Additional Fae subspecies
+    Sylph,        // Wind spirit, +speed
+    WillOWisp,    // Light spirit, +evasion
+    DarkFairy,    // Corrupted, +shadow magic
+    Leprechaun,   // Lucky, +gold find
+
+    // Additional Human subspecies
+    Northerner,   // Hardy, +cold resist
+    Southerner,   // Desert, +heat resist
+    Imperial,     // Military, +discipline
+    Nomad,        // Wanderer, +survival
+
+    // Dragonborn evolution subspecies
+    Drake,        // Young dragon, balanced
+    Wyrm,         // Ancient, +mana
+    TrueDragon,   // Full dragon form, +all stats
+    ElderDragon,  // Ancient wisdom, +mana/defense
+    DragonGod,    // Transcendent, massive +all
 }
 
 impl Subspecies {
     pub fn name(&self) -> &'static str {
         match self {
             // Humans
-            Self::Highlander => "Highlander",
-            Self::Lowlander => "Lowlander",
+            Self::Noble => "Noble",
+            Self::Commoner => "Commoner",
+            Self::Barbarian => "Barbarian",
             Self::Islander => "Islander",
-            Self::Nomad => "Nomad",
-            Self::Imperial => "Imperial",
             // Elves
             Self::HighElf => "High Elf",
             Self::WoodElf => "Wood Elf",
             Self::DarkElf => "Dark Elf",
             Self::SeaElf => "Sea Elf",
-            Self::BloodElf => "Blood Elf",
             // Dwarves
-            Self::MountainDwarf => "Mountain Dwarf",
-            Self::HillDwarf => "Hill Dwarf",
-            Self::DeepDwarf => "Deep Dwarf",
-            Self::ForgeDwarf => "Forge Dwarf",
-            Self::FrostDwarf => "Frost Dwarf",
+            Self::Mountain => "Mountain Dwarf",
+            Self::Hill => "Hill Dwarf",
+            Self::Deep => "Deep Dwarf",
+            Self::Frost => "Frost Dwarf",
             // Orcs
-            Self::GreyOrc => "Grey Orc",
-            Self::BlackOrc => "Black Orc",
-            Self::BloodOrc => "Blood Orc",
-            Self::ShamanOrc => "Shaman Orc",
-            Self::IronOrc => "Iron Orc",
+            Self::Green => "Green Orc",
+            Self::Grey => "Grey Orc",
+            Self::Black => "Black Orc",
+            Self::HalfOrc => "Half-Orc",
             // Undead
             Self::Skeleton => "Skeleton",
             Self::Zombie => "Zombie",
-            Self::Ghoul => "Ghoul",
+            Self::Ghost => "Ghost",
             Self::Vampire => "Vampire",
             Self::Lich => "Lich",
             // Demons
             Self::Imp => "Imp",
             Self::Succubus => "Succubus",
-            Self::Hellspawn => "Hellspawn",
-            Self::ShadowFiend => "Shadow Fiend",
-            Self::ArchDemon => "Arch Demon",
+            Self::PitFiend => "Pit Fiend",
+            Self::Balor => "Balor",
             // Beastkin
-            Self::Wolfkin => "Wolfkin",
-            Self::Catfolk => "Catfolk",
-            Self::Bearkin => "Bearkin",
-            Self::Ratling => "Ratling",
-            Self::Serpentine => "Serpentine",
+            Self::Wolf => "Wolfkin",
+            Self::Cat => "Catfolk",
+            Self::Bear => "Bearkin",
+            Self::Fox => "Foxkin",
+            Self::Rabbit => "Rabbitfolk",
             // Dragonborn
             Self::FireDrake => "Fire Drake",
             Self::IceDrake => "Ice Drake",
             Self::StormDrake => "Storm Drake",
             Self::ShadowDrake => "Shadow Drake",
-            Self::GoldenDrake => "Golden Drake",
             // Fae
             Self::Pixie => "Pixie",
             Self::Sprite => "Sprite",
             Self::Dryad => "Dryad",
-            Self::Wisp => "Wisp",
-            Self::Changeling => "Changeling",
+            Self::Nymph => "Nymph",
             // Constructs
             Self::Golem => "Golem",
             Self::Automaton => "Automaton",
             Self::Warforged => "Warforged",
-            Self::Homunculus => "Homunculus",
-            Self::ClockworkKnight => "Clockwork Knight",
+            Self::Clockwork => "Clockwork",
             // Elementals
-            Self::Flameling => "Flameling",
-            Self::Tideling => "Tideling",
-            Self::Stoneling => "Stoneling",
-            Self::Windling => "Windling",
-            Self::Voidling => "Voidling",
+            Self::Fire => "Fire Elemental",
+            Self::Water => "Water Elemental",
+            Self::Earth => "Earth Elemental",
+            Self::Air => "Air Elemental",
             // Celestials
-            Self::Aasimar => "Aasimar",
-            Self::Nephilim => "Nephilim",
-            Self::Seraphim => "Seraphim",
-            Self::Valkyrie => "Valkyrie",
+            Self::Angel => "Angel",
+            Self::Seraph => "Seraph",
             Self::Archon => "Archon",
+            Self::Nephilim => "Nephilim",
+            Self::Cherub => "Cherub",
+            Self::Throne => "Throne",
+            Self::Dominion => "Dominion",
+            Self::Virtue => "Virtue",
+            // Additional Elves
+            Self::BloodElf => "Blood Elf",
+            Self::MoonElf => "Moon Elf",
+            Self::SunElf => "Sun Elf",
+            Self::WildElf => "Wild Elf",
+            // Additional Dwarves
+            Self::GoldDwarf => "Gold Dwarf",
+            Self::IronDwarf => "Iron Dwarf",
+            Self::RuneDwarf => "Rune Dwarf",
+            Self::FireDwarf => "Fire Dwarf",
+            // Additional Fae
+            Self::Sylph => "Sylph",
+            Self::WillOWisp => "Will-o'-Wisp",
+            Self::DarkFairy => "Dark Fairy",
+            Self::Leprechaun => "Leprechaun",
+            // Additional Humans
+            Self::Northerner => "Northerner",
+            Self::Southerner => "Southerner",
+            Self::Imperial => "Imperial",
+            Self::Nomad => "Nomad",
+            // Dragonborn evolution
+            Self::Drake => "Drake",
+            Self::Wyrm => "Wyrm",
+            Self::TrueDragon => "True Dragon",
+            Self::ElderDragon => "Elder Dragon",
+            Self::DragonGod => "Dragon God",
         }
     }
 
     pub fn description(&self) -> &'static str {
         match self {
-            Self::Highlander => "Hardy mountain folk with unmatched endurance.",
-            Self::Lowlander => "Adaptable plains dwellers, jack of all trades.",
-            Self::Islander => "Swift sailors with exceptional reflexes.",
-            Self::Nomad => "Desert wanderers who thrive in harsh conditions.",
-            Self::Imperial => "Noble-blooded with natural leadership.",
-            Self::HighElf => "Masters of arcane magic with ancient knowledge.",
-            Self::WoodElf => "Forest guardians with unparalleled stealth.",
-            Self::DarkElf => "Shadow dwellers wielding dark magic.",
-            Self::SeaElf => "Aquatic elves who breathe underwater.",
-            Self::BloodElf => "Magic-addicted elves who drain mana from foes.",
-            Self::MountainDwarf => "Traditional dwarves with stone-hard resolve.",
-            Self::HillDwarf => "Surface dwarves with remarkable vitality.",
-            Self::DeepDwarf => "Underdark dwellers with superior darkvision.",
-            Self::ForgeDwarf => "Master smiths who craft legendary items.",
-            Self::FrostDwarf => "Ice mountain dwarves immune to cold.",
-            Self::GreyOrc => "Common orcs with balanced abilities.",
-            Self::BlackOrc => "Elite orc warriors of terrifying strength.",
-            Self::BloodOrc => "Berserkers who grow stronger when wounded.",
-            Self::ShamanOrc => "Rare magic-wielding orcs.",
-            Self::IronOrc => "Heavily armored orc defenders.",
-            Self::Skeleton => "Animated bones immune to bleeding.",
-            Self::Zombie => "Shambling corpses of great resilience.",
-            Self::Ghoul => "Fast undead with paralyzing touch.",
-            Self::Vampire => "Immortal blood drinkers with many powers.",
-            Self::Lich => "Undead archmages of immense power.",
-            Self::Imp => "Small trickster demons, quick and cunning.",
-            Self::Succubus => "Charming demons who drain life force.",
-            Self::Hellspawn => "Fire demons born of infernal flames.",
-            Self::ShadowFiend => "Shadow demons masters of darkness.",
-            Self::ArchDemon => "Powerful demon lords with all abilities.",
-            Self::Wolfkin => "Wolf-human hybrids with pack instincts.",
-            Self::Catfolk => "Feline humanoids with superior agility.",
-            Self::Bearkin => "Bear-folk with tremendous strength.",
-            Self::Ratling => "Rat-folk survivors of the underworld.",
-            Self::Serpentine => "Snake-folk with venomous abilities.",
-            Self::FireDrake => "Fire-breathing dragon descendants.",
-            Self::IceDrake => "Frost-breathing dragon descendants.",
-            Self::StormDrake => "Lightning-breathing dragon descendants.",
-            Self::ShadowDrake => "Shadow-breathing dragon descendants.",
-            Self::GoldenDrake => "Radiant dragon descendants of legend.",
-            Self::Pixie => "Tiny flying fae with illusion magic.",
-            Self::Sprite => "Nature spirits with healing powers.",
-            Self::Dryad => "Tree-bound spirits of the forest.",
-            Self::Wisp => "Ethereal beings who phase through matter.",
-            Self::Changeling => "Shapeshifters who mimic any form.",
-            Self::Golem => "Stone or clay constructs of great defense.",
-            Self::Automaton => "Mechanical beings of balanced design.",
-            Self::Warforged => "Battle constructs built for war.",
-            Self::Homunculus => "Small familiar constructs.",
-            Self::ClockworkKnight => "Precision mechanical warriors.",
-            Self::Flameling => "Beings of pure fire.",
-            Self::Tideling => "Beings of pure water.",
-            Self::Stoneling => "Beings of pure earth.",
-            Self::Windling => "Beings of pure air.",
-            Self::Voidling => "Beings of the void between worlds.",
-            Self::Aasimar => "Mortals touched by angelic blood.",
-            Self::Nephilim => "Offspring of fallen angels.",
-            Self::Seraphim => "Pure angelic beings of light.",
-            Self::Valkyrie => "Warrior angels who choose the slain.",
-            Self::Archon => "Embodiments of divine justice.",
+            Self::Noble => "Educated and wealthy, born to lead.",
+            Self::Commoner => "Hard-working and adaptable, learns quickly.",
+            Self::Barbarian => "Fierce warrior from the wilds.",
+            Self::Islander => "Born of the sea, swift and agile.",
+            Self::HighElf => "Master of arcane arts and ancient lore.",
+            Self::WoodElf => "Guardian of the forest, swift and silent.",
+            Self::DarkElf => "Dweller of the deep, master of shadow.",
+            Self::SeaElf => "At home in the water as much as land.",
+            Self::Mountain => "Stout defender of the mountain holds.",
+            Self::Hill => "Trader and craftsman of the surface hills.",
+            Self::Deep => "Survivor of the dangerous underdark.",
+            Self::Frost => "Hardened by the eternal winter peaks.",
+            Self::Green => "The most common orc, balanced and strong.",
+            Self::Grey => "Cunning strategist of the rocky wastes.",
+            Self::Black => "Elite warrior bred for war.",
+            Self::HalfOrc => "Walking two worlds, versatile and tough.",
+            Self::Skeleton => "Bones animated by magic, tireless.",
+            Self::Zombie => "Flesh animated by dark rites, resilient.",
+            Self::Ghost => "Spirit bound to the mortal plane.",
+            Self::Vampire => "Aristocrat of the night, drains life.",
+            Self::Lich => "Master of death magic, immortal.",
+            Self::Imp => "Tiny mischief maker, hard to hit.",
+            Self::Succubus => "Manipulator of hearts and minds.",
+            Self::PitFiend => "General of the infernal armies.",
+            Self::Balor => "Living engine of fire and destruction.",
+            Self::Wolf => "Hunter with keen senses and pack instincts.",
+            Self::Cat => "Graceful predator, always lands on feet.",
+            Self::Bear => "Powerhouse of raw strength.",
+            Self::Fox => "Trickster spirit, clever and quick.",
+            Self::Rabbit => "Impossible to catch, senses danger.",
+            Self::FireDrake => "Blood of the red dragons, breathes fire.",
+            Self::IceDrake => "Blood of the white dragons, breathes ice.",
+            Self::StormDrake => "Blood of the blue dragons, breathes lightning.",
+            Self::ShadowDrake => "Blood of the shadow dragons, breathes darkness.",
+            Self::Pixie => "Tiny magical prankster.",
+            Self::Sprite => "Protector of nature's beauty.",
+            Self::Dryad => "One with the trees and plants.",
+            Self::Nymph => "Spirit of the waters and wild places.",
+            Self::Golem => "Animated matter, slow but unbreakable.",
+            Self::Automaton => "Clockwork precision and metal skin.",
+            Self::Warforged => "Built for a war that ended ages ago.",
+            Self::Clockwork => "Intricate machinery given life.",
+            Self::Fire => "Living flame, burns all it touches.",
+            Self::Water => "Fluid and changing, crashes like waves.",
+            Self::Earth => "Solid and unmoving as the mountain.",
+            Self::Air => "Free and unseen as the wind.",
+            Self::Angel => "Messenger of the divine.",
+            Self::Seraph => "Burning purity of the highest order.",
+            Self::Archon => "Enforcer of cosmic law.",
+            Self::Nephilim => "Child of heaven and earth.",
+            Self::Cherub => "Guardian spirit that shields the worthy.",
+            Self::Throne => "Living seat of divine power and authority.",
+            Self::Dominion => "Authority incarnate, commands the celestial host.",
+            Self::Virtue => "Embodiment of goodness and divine healing.",
+            // Additional Elves
+            Self::BloodElf => "Addicted to mana, drains magic from others.",
+            Self::MoonElf => "Blessed by the moon, powerful at night.",
+            Self::SunElf => "Empowered by sunlight, radiant in day.",
+            Self::WildElf => "Feral and untamed, at one with nature.",
+            // Additional Dwarves
+            Self::GoldDwarf => "Wealthy traders with a nose for treasure.",
+            Self::IronDwarf => "Master metalworkers who forge legendary arms.",
+            Self::RuneDwarf => "Practitioners of ancient runic magic.",
+            Self::FireDwarf => "Volcanic dwellers, resistant to flame.",
+            // Additional Fae
+            Self::Sylph => "Wind spirit, swift and elusive.",
+            Self::WillOWisp => "Ethereal light spirit, nearly impossible to hit.",
+            Self::DarkFairy => "Corrupted fae wielding shadow magic.",
+            Self::Leprechaun => "Lucky trickster who always finds gold.",
+            // Additional Humans
+            Self::Northerner => "Hardy folk from frozen lands, tough and resilient.",
+            Self::Southerner => "Desert-born, accustomed to scorching heat.",
+            Self::Imperial => "Disciplined soldier of the great empire.",
+            Self::Nomad => "Wanderer of the wilds, survivalist and explorer.",
+            // Dragonborn evolution
+            Self::Drake => "Young dragon-blooded warrior, balanced in all ways.",
+            Self::Wyrm => "Ancient serpentine dragon, deep in magic.",
+            Self::TrueDragon => "Fully awakened dragon form, power incarnate.",
+            Self::ElderDragon => "Ancient dragon of immense wisdom and power.",
+            Self::DragonGod => "Transcendent draconic deity, beyond mortal limits.",
         }
     }
 
     pub fn parent_species(&self) -> Species {
         match self {
-            Self::Highlander | Self::Lowlander | Self::Islander |
-            Self::Nomad | Self::Imperial => Species::Human,
-
-            Self::HighElf | Self::WoodElf | Self::DarkElf |
-            Self::SeaElf | Self::BloodElf => Species::Elf,
-
-            Self::MountainDwarf | Self::HillDwarf | Self::DeepDwarf |
-            Self::ForgeDwarf | Self::FrostDwarf => Species::Dwarf,
-
-            Self::GreyOrc | Self::BlackOrc | Self::BloodOrc |
-            Self::ShamanOrc | Self::IronOrc => Species::Orc,
-
-            Self::Skeleton | Self::Zombie | Self::Ghoul |
-            Self::Vampire | Self::Lich => Species::Undead,
-
-            Self::Imp | Self::Succubus | Self::Hellspawn |
-            Self::ShadowFiend | Self::ArchDemon => Species::Demon,
-
-            Self::Wolfkin | Self::Catfolk | Self::Bearkin |
-            Self::Ratling | Self::Serpentine => Species::Beastkin,
-
-            Self::FireDrake | Self::IceDrake | Self::StormDrake |
-            Self::ShadowDrake | Self::GoldenDrake => Species::Dragonborn,
-
-            Self::Pixie | Self::Sprite | Self::Dryad |
-            Self::Wisp | Self::Changeling => Species::Fae,
-
-            Self::Golem | Self::Automaton | Self::Warforged |
-            Self::Homunculus | Self::ClockworkKnight => Species::Construct,
-
-            Self::Flameling | Self::Tideling | Self::Stoneling |
-            Self::Windling | Self::Voidling => Species::Elemental,
-
-            Self::Aasimar | Self::Nephilim | Self::Seraphim |
-            Self::Valkyrie | Self::Archon => Species::Celestial,
+            Self::Noble | Self::Commoner | Self::Barbarian | Self::Islander
+                | Self::Northerner | Self::Southerner | Self::Imperial | Self::Nomad => Species::Human,
+            Self::HighElf | Self::WoodElf | Self::DarkElf | Self::SeaElf
+                | Self::BloodElf | Self::MoonElf | Self::SunElf | Self::WildElf => Species::Elf,
+            Self::Mountain | Self::Hill | Self::Deep | Self::Frost
+                | Self::GoldDwarf | Self::IronDwarf | Self::RuneDwarf | Self::FireDwarf => Species::Dwarf,
+            Self::Green | Self::Grey | Self::Black | Self::HalfOrc => Species::Orc,
+            Self::Skeleton | Self::Zombie | Self::Ghost | Self::Vampire | Self::Lich => Species::Undead,
+            Self::Imp | Self::Succubus | Self::PitFiend | Self::Balor => Species::Demon,
+            Self::Wolf | Self::Cat | Self::Bear | Self::Fox | Self::Rabbit => Species::Beastkin,
+            Self::FireDrake | Self::IceDrake | Self::StormDrake | Self::ShadowDrake
+                | Self::Drake | Self::Wyrm | Self::TrueDragon | Self::ElderDragon | Self::DragonGod => Species::Dragonborn,
+            Self::Pixie | Self::Sprite | Self::Dryad | Self::Nymph
+                | Self::Sylph | Self::WillOWisp | Self::DarkFairy | Self::Leprechaun => Species::Fae,
+            Self::Golem | Self::Automaton | Self::Warforged | Self::Clockwork => Species::Construct,
+            Self::Fire | Self::Water | Self::Earth | Self::Air => Species::Elemental,
+            Self::Angel | Self::Seraph | Self::Archon | Self::Nephilim
+                | Self::Cherub | Self::Throne | Self::Dominion | Self::Virtue => Species::Celestial,
         }
     }
 
     pub fn modifiers(&self) -> StatModifiers {
-        // Subspecies modifiers stack with species modifiers
         match self {
-            // Humans
-            Self::Highlander => StatModifiers { hp: 1.05, attack: 1.0, defense: 1.10, mana: 0.95, speed: 0.95, xp_bonus: 1.0 },
-            Self::Lowlander => StatModifiers { hp: 1.0, attack: 1.0, defense: 1.0, mana: 1.0, speed: 1.0, xp_bonus: 1.05 },
-            Self::Islander => StatModifiers { hp: 0.95, attack: 1.0, defense: 0.95, mana: 1.0, speed: 1.15, xp_bonus: 1.0 },
-            Self::Nomad => StatModifiers { hp: 1.10, attack: 1.0, defense: 0.95, mana: 0.95, speed: 1.05, xp_bonus: 1.0 },
-            Self::Imperial => StatModifiers { hp: 1.0, attack: 0.95, defense: 1.0, mana: 1.05, speed: 1.0, xp_bonus: 1.10 },
+            // Human: +10% XP, Versatile
+            Self::Noble => StatModifiers { hp: 1.0, attack: 1.0, defense: 1.0, mana: 1.1, speed: 1.0, xp_bonus: 1.15 },
+            Self::Commoner => StatModifiers { hp: 1.05, attack: 1.0, defense: 1.0, mana: 1.0, speed: 1.0, xp_bonus: 1.20 },
+            Self::Barbarian => StatModifiers { hp: 1.15, attack: 1.1, defense: 0.9, mana: 0.8, speed: 1.05, xp_bonus: 1.10 },
+            Self::Islander => StatModifiers { hp: 1.0, attack: 1.0, defense: 0.95, mana: 1.0, speed: 1.15, xp_bonus: 1.10 },
 
-            // Elves
-            Self::HighElf => StatModifiers { hp: 0.95, attack: 0.90, defense: 0.90, mana: 1.25, speed: 1.0, xp_bonus: 1.0 },
-            Self::WoodElf => StatModifiers { hp: 1.0, attack: 1.05, defense: 0.95, mana: 1.0, speed: 1.15, xp_bonus: 1.0 },
-            Self::DarkElf => StatModifiers { hp: 0.95, attack: 1.10, defense: 0.90, mana: 1.15, speed: 1.05, xp_bonus: 1.0 },
-            Self::SeaElf => StatModifiers { hp: 1.05, attack: 1.0, defense: 1.0, mana: 1.05, speed: 1.10, xp_bonus: 1.0 },
-            Self::BloodElf => StatModifiers { hp: 0.90, attack: 1.0, defense: 0.85, mana: 1.30, speed: 1.0, xp_bonus: 1.0 },
+            // Elf: +20% Mana, +10% Speed
+            Self::HighElf => StatModifiers { hp: 0.9, attack: 0.9, defense: 0.9, mana: 1.3, speed: 1.1, xp_bonus: 1.0 },
+            Self::WoodElf => StatModifiers { hp: 1.0, attack: 1.0, defense: 0.9, mana: 1.2, speed: 1.2, xp_bonus: 1.0 },
+            Self::DarkElf => StatModifiers { hp: 0.95, attack: 1.1, defense: 0.9, mana: 1.25, speed: 1.15, xp_bonus: 1.0 },
+            Self::SeaElf => StatModifiers { hp: 1.0, attack: 1.0, defense: 1.0, mana: 1.2, speed: 1.15, xp_bonus: 1.0 },
 
-            // Dwarves
-            Self::MountainDwarf => StatModifiers { hp: 1.05, attack: 1.05, defense: 1.15, mana: 0.90, speed: 0.95, xp_bonus: 1.0 },
-            Self::HillDwarf => StatModifiers { hp: 1.15, attack: 1.0, defense: 1.05, mana: 0.95, speed: 1.0, xp_bonus: 1.0 },
-            Self::DeepDwarf => StatModifiers { hp: 1.0, attack: 1.10, defense: 1.10, mana: 0.95, speed: 0.90, xp_bonus: 1.0 },
-            Self::ForgeDwarf => StatModifiers { hp: 1.05, attack: 1.0, defense: 1.05, mana: 0.90, speed: 0.95, xp_bonus: 1.05 },
-            Self::FrostDwarf => StatModifiers { hp: 1.10, attack: 1.0, defense: 1.10, mana: 0.85, speed: 0.90, xp_bonus: 1.0 },
+            // Dwarf: +20% Defense
+            Self::Mountain => StatModifiers { hp: 1.1, attack: 1.0, defense: 1.3, mana: 0.8, speed: 0.9, xp_bonus: 1.0 },
+            Self::Hill => StatModifiers { hp: 1.2, attack: 1.0, defense: 1.2, mana: 0.9, speed: 0.9, xp_bonus: 1.0 },
+            Self::Deep => StatModifiers { hp: 1.0, attack: 1.1, defense: 1.2, mana: 1.0, speed: 0.9, xp_bonus: 1.0 },
+            Self::Frost => StatModifiers { hp: 1.15, attack: 1.05, defense: 1.2, mana: 0.8, speed: 0.9, xp_bonus: 1.0 },
 
-            // Orcs
-            Self::GreyOrc => StatModifiers { hp: 1.0, attack: 1.05, defense: 1.0, mana: 0.95, speed: 1.0, xp_bonus: 1.0 },
-            Self::BlackOrc => StatModifiers { hp: 1.10, attack: 1.20, defense: 1.05, mana: 0.80, speed: 0.95, xp_bonus: 0.95 },
-            Self::BloodOrc => StatModifiers { hp: 0.95, attack: 1.15, defense: 0.90, mana: 0.85, speed: 1.10, xp_bonus: 1.0 },
-            Self::ShamanOrc => StatModifiers { hp: 0.90, attack: 0.95, defense: 0.90, mana: 1.30, speed: 1.0, xp_bonus: 1.0 },
-            Self::IronOrc => StatModifiers { hp: 1.15, attack: 1.0, defense: 1.25, mana: 0.75, speed: 0.85, xp_bonus: 1.0 },
+            // Orc: +25% Attack, -10% Int
+            Self::Green => StatModifiers { hp: 1.1, attack: 1.25, defense: 1.0, mana: 0.7, speed: 1.0, xp_bonus: 1.0 },
+            Self::Grey => StatModifiers { hp: 1.0, attack: 1.2, defense: 1.1, mana: 0.8, speed: 1.0, xp_bonus: 1.0 },
+            Self::Black => StatModifiers { hp: 1.15, attack: 1.35, defense: 1.0, mana: 0.6, speed: 1.0, xp_bonus: 0.95 },
+            Self::HalfOrc => StatModifiers { hp: 1.05, attack: 1.15, defense: 1.0, mana: 0.9, speed: 1.0, xp_bonus: 1.05 },
 
-            // Undead
-            Self::Skeleton => StatModifiers { hp: 0.85, attack: 1.0, defense: 1.05, mana: 0.90, speed: 1.05, xp_bonus: 1.0 },
-            Self::Zombie => StatModifiers { hp: 1.30, attack: 0.95, defense: 1.10, mana: 0.70, speed: 0.75, xp_bonus: 1.0 },
-            Self::Ghoul => StatModifiers { hp: 0.95, attack: 1.10, defense: 0.90, mana: 0.85, speed: 1.20, xp_bonus: 1.0 },
-            Self::Vampire => StatModifiers { hp: 1.0, attack: 1.15, defense: 1.0, mana: 1.15, speed: 1.15, xp_bonus: 1.0 },
-            Self::Lich => StatModifiers { hp: 0.80, attack: 0.90, defense: 0.85, mana: 1.50, speed: 0.90, xp_bonus: 1.0 },
+            // Undead: Immunity/Resistances focus
+            Self::Skeleton => StatModifiers { hp: 0.8, attack: 1.0, defense: 1.1, mana: 0.9, speed: 1.1, xp_bonus: 1.0 },
+            Self::Zombie => StatModifiers { hp: 1.4, attack: 1.1, defense: 1.1, mana: 0.5, speed: 0.7, xp_bonus: 1.0 },
+            Self::Ghost => StatModifiers { hp: 0.6, attack: 0.8, defense: 1.5, mana: 1.2, speed: 1.2, xp_bonus: 1.0 },
+            Self::Vampire => StatModifiers { hp: 1.1, attack: 1.2, defense: 1.0, mana: 1.1, speed: 1.1, xp_bonus: 1.0 },
+            Self::Lich => StatModifiers { hp: 0.7, attack: 0.8, defense: 0.8, mana: 1.5, speed: 0.9, xp_bonus: 1.0 },
 
-            // Demons
-            Self::Imp => StatModifiers { hp: 0.75, attack: 0.90, defense: 0.80, mana: 1.10, speed: 1.30, xp_bonus: 1.0 },
-            Self::Succubus => StatModifiers { hp: 0.90, attack: 1.0, defense: 0.85, mana: 1.20, speed: 1.10, xp_bonus: 1.0 },
-            Self::Hellspawn => StatModifiers { hp: 1.10, attack: 1.20, defense: 1.0, mana: 1.05, speed: 1.0, xp_bonus: 1.0 },
-            Self::ShadowFiend => StatModifiers { hp: 0.90, attack: 1.15, defense: 0.85, mana: 1.15, speed: 1.20, xp_bonus: 1.0 },
-            Self::ArchDemon => StatModifiers { hp: 1.15, attack: 1.15, defense: 1.10, mana: 1.20, speed: 1.05, xp_bonus: 0.90 },
+            // Demon: +15% Attack
+            Self::Imp => StatModifiers { hp: 0.7, attack: 1.1, defense: 0.8, mana: 1.1, speed: 1.4, xp_bonus: 1.0 },
+            Self::Succubus => StatModifiers { hp: 0.9, attack: 1.0, defense: 0.9, mana: 1.3, speed: 1.1, xp_bonus: 1.0 },
+            Self::PitFiend => StatModifiers { hp: 1.2, attack: 1.3, defense: 1.1, mana: 1.0, speed: 1.0, xp_bonus: 1.0 },
+            Self::Balor => StatModifiers { hp: 1.3, attack: 1.4, defense: 1.0, mana: 1.1, speed: 0.9, xp_bonus: 0.9 },
 
-            // Beastkin
-            Self::Wolfkin => StatModifiers { hp: 1.0, attack: 1.10, defense: 0.95, mana: 0.90, speed: 1.15, xp_bonus: 1.0 },
-            Self::Catfolk => StatModifiers { hp: 0.90, attack: 1.05, defense: 0.85, mana: 0.95, speed: 1.25, xp_bonus: 1.0 },
-            Self::Bearkin => StatModifiers { hp: 1.20, attack: 1.15, defense: 1.10, mana: 0.80, speed: 0.90, xp_bonus: 1.0 },
-            Self::Ratling => StatModifiers { hp: 0.85, attack: 0.95, defense: 0.85, mana: 0.95, speed: 1.20, xp_bonus: 1.05 },
-            Self::Serpentine => StatModifiers { hp: 0.95, attack: 1.10, defense: 0.90, mana: 1.05, speed: 1.10, xp_bonus: 1.0 },
+            // Beastkin: +15% Speed
+            Self::Wolf => StatModifiers { hp: 1.0, attack: 1.1, defense: 0.95, mana: 0.9, speed: 1.2, xp_bonus: 1.0 },
+            Self::Cat => StatModifiers { hp: 0.9, attack: 1.1, defense: 0.85, mana: 1.0, speed: 1.3, xp_bonus: 1.0 },
+            Self::Bear => StatModifiers { hp: 1.3, attack: 1.2, defense: 1.1, mana: 0.8, speed: 0.9, xp_bonus: 1.0 },
+            Self::Fox => StatModifiers { hp: 0.85, attack: 0.95, defense: 0.9, mana: 1.2, speed: 1.2, xp_bonus: 1.0 },
+            Self::Rabbit => StatModifiers { hp: 0.7, attack: 0.8, defense: 0.8, mana: 1.0, speed: 1.5, xp_bonus: 1.1 },
 
-            // Dragonborn
-            Self::FireDrake => StatModifiers { hp: 1.05, attack: 1.15, defense: 1.05, mana: 1.0, speed: 1.0, xp_bonus: 1.0 },
-            Self::IceDrake => StatModifiers { hp: 1.10, attack: 1.0, defense: 1.15, mana: 1.0, speed: 0.95, xp_bonus: 1.0 },
-            Self::StormDrake => StatModifiers { hp: 1.0, attack: 1.10, defense: 1.0, mana: 1.10, speed: 1.10, xp_bonus: 1.0 },
-            Self::ShadowDrake => StatModifiers { hp: 0.95, attack: 1.10, defense: 0.95, mana: 1.10, speed: 1.15, xp_bonus: 1.0 },
-            Self::GoldenDrake => StatModifiers { hp: 1.05, attack: 1.05, defense: 1.10, mana: 1.15, speed: 1.0, xp_bonus: 1.10 },
+            // Dragonborn: +20% HP
+            Self::FireDrake => StatModifiers { hp: 1.2, attack: 1.1, defense: 1.1, mana: 1.0, speed: 0.9, xp_bonus: 1.0 },
+            Self::IceDrake => StatModifiers { hp: 1.25, attack: 1.0, defense: 1.15, mana: 1.0, speed: 0.9, xp_bonus: 1.0 },
+            Self::StormDrake => StatModifiers { hp: 1.2, attack: 1.1, defense: 1.0, mana: 1.1, speed: 1.0, xp_bonus: 1.0 },
+            Self::ShadowDrake => StatModifiers { hp: 1.15, attack: 1.1, defense: 1.0, mana: 1.1, speed: 1.1, xp_bonus: 1.0 },
 
-            // Fae
-            Self::Pixie => StatModifiers { hp: 0.60, attack: 0.75, defense: 0.60, mana: 1.40, speed: 1.50, xp_bonus: 1.0 },
-            Self::Sprite => StatModifiers { hp: 0.75, attack: 0.80, defense: 0.70, mana: 1.30, speed: 1.30, xp_bonus: 1.0 },
-            Self::Dryad => StatModifiers { hp: 0.90, attack: 0.85, defense: 0.90, mana: 1.25, speed: 1.10, xp_bonus: 1.0 },
-            Self::Wisp => StatModifiers { hp: 0.65, attack: 0.70, defense: 0.50, mana: 1.50, speed: 1.40, xp_bonus: 1.0 },
-            Self::Changeling => StatModifiers { hp: 0.85, attack: 0.95, defense: 0.85, mana: 1.15, speed: 1.15, xp_bonus: 1.05 },
+            // Fae: +30% Mana
+            Self::Pixie => StatModifiers { hp: 0.5, attack: 0.6, defense: 0.6, mana: 1.4, speed: 1.4, xp_bonus: 1.0 },
+            Self::Sprite => StatModifiers { hp: 0.7, attack: 0.8, defense: 0.7, mana: 1.3, speed: 1.3, xp_bonus: 1.0 },
+            Self::Dryad => StatModifiers { hp: 1.1, attack: 0.9, defense: 1.1, mana: 1.3, speed: 0.9, xp_bonus: 1.0 },
+            Self::Nymph => StatModifiers { hp: 0.9, attack: 0.8, defense: 0.8, mana: 1.4, speed: 1.1, xp_bonus: 1.0 },
 
-            // Constructs
-            Self::Golem => StatModifiers { hp: 1.40, attack: 1.0, defense: 1.35, mana: 0.40, speed: 0.70, xp_bonus: 1.0 },
-            Self::Automaton => StatModifiers { hp: 1.20, attack: 1.05, defense: 1.20, mana: 0.60, speed: 0.90, xp_bonus: 1.0 },
-            Self::Warforged => StatModifiers { hp: 1.25, attack: 1.15, defense: 1.15, mana: 0.50, speed: 0.95, xp_bonus: 1.0 },
-            Self::Homunculus => StatModifiers { hp: 0.70, attack: 0.80, defense: 0.80, mana: 1.20, speed: 1.10, xp_bonus: 1.0 },
-            Self::ClockworkKnight => StatModifiers { hp: 1.15, attack: 1.20, defense: 1.10, mana: 0.55, speed: 1.0, xp_bonus: 1.0 },
+            // Construct: +25% Defense
+            Self::Golem => StatModifiers { hp: 1.4, attack: 1.1, defense: 1.4, mana: 0.4, speed: 0.6, xp_bonus: 1.0 },
+            Self::Automaton => StatModifiers { hp: 1.1, attack: 1.0, defense: 1.25, mana: 0.7, speed: 1.0, xp_bonus: 1.0 },
+            Self::Warforged => StatModifiers { hp: 1.2, attack: 1.2, defense: 1.3, mana: 0.6, speed: 0.9, xp_bonus: 1.0 },
+            Self::Clockwork => StatModifiers { hp: 1.0, attack: 1.1, defense: 1.2, mana: 0.8, speed: 1.1, xp_bonus: 1.0 },
 
-            // Elementals
-            Self::Flameling => StatModifiers { hp: 0.85, attack: 1.25, defense: 0.80, mana: 1.20, speed: 1.15, xp_bonus: 1.0 },
-            Self::Tideling => StatModifiers { hp: 1.0, attack: 1.0, defense: 1.0, mana: 1.30, speed: 1.05, xp_bonus: 1.0 },
-            Self::Stoneling => StatModifiers { hp: 1.20, attack: 1.05, defense: 1.30, mana: 0.90, speed: 0.80, xp_bonus: 1.0 },
-            Self::Windling => StatModifiers { hp: 0.75, attack: 0.95, defense: 0.70, mana: 1.20, speed: 1.40, xp_bonus: 1.0 },
-            Self::Voidling => StatModifiers { hp: 0.90, attack: 1.20, defense: 0.85, mana: 1.35, speed: 1.10, xp_bonus: 1.0 },
+            // Elemental: +50% Elemental Dmg (simulated via higher mana/attack)
+            Self::Fire => StatModifiers { hp: 0.9, attack: 1.3, defense: 0.8, mana: 1.3, speed: 1.1, xp_bonus: 1.0 },
+            Self::Water => StatModifiers { hp: 1.1, attack: 0.9, defense: 1.1, mana: 1.3, speed: 1.0, xp_bonus: 1.0 },
+            Self::Earth => StatModifiers { hp: 1.3, attack: 1.1, defense: 1.3, mana: 0.9, speed: 0.7, xp_bonus: 1.0 },
+            Self::Air => StatModifiers { hp: 0.8, attack: 1.0, defense: 0.7, mana: 1.2, speed: 1.5, xp_bonus: 1.0 },
 
-            // Celestials
-            Self::Aasimar => StatModifiers { hp: 1.05, attack: 1.0, defense: 1.05, mana: 1.15, speed: 1.05, xp_bonus: 1.05 },
-            Self::Nephilim => StatModifiers { hp: 1.10, attack: 1.15, defense: 1.0, mana: 1.10, speed: 1.0, xp_bonus: 1.0 },
-            Self::Seraphim => StatModifiers { hp: 0.95, attack: 0.95, defense: 0.95, mana: 1.40, speed: 1.15, xp_bonus: 1.0 },
-            Self::Valkyrie => StatModifiers { hp: 1.10, attack: 1.15, defense: 1.10, mana: 1.05, speed: 1.10, xp_bonus: 1.0 },
-            Self::Archon => StatModifiers { hp: 1.15, attack: 1.10, defense: 1.15, mana: 1.15, speed: 1.0, xp_bonus: 0.95 },
+            // Celestial: +20% Holy Dmg
+            Self::Angel => StatModifiers { hp: 1.1, attack: 1.1, defense: 1.1, mana: 1.2, speed: 1.1, xp_bonus: 1.0 },
+            Self::Seraph => StatModifiers { hp: 1.0, attack: 1.2, defense: 1.0, mana: 1.3, speed: 1.2, xp_bonus: 1.0 },
+            Self::Archon => StatModifiers { hp: 1.2, attack: 1.2, defense: 1.2, mana: 1.1, speed: 1.0, xp_bonus: 1.0 },
+            Self::Nephilim => StatModifiers { hp: 1.1, attack: 1.1, defense: 1.1, mana: 1.1, speed: 1.1, xp_bonus: 1.1 },
+            Self::Cherub => StatModifiers { hp: 1.1, attack: 0.9, defense: 1.3, mana: 1.1, speed: 1.0, xp_bonus: 1.0 },
+            Self::Throne => StatModifiers { hp: 1.2, attack: 1.0, defense: 1.1, mana: 1.2, speed: 0.9, xp_bonus: 1.05 },
+            Self::Dominion => StatModifiers { hp: 1.0, attack: 1.3, defense: 1.0, mana: 1.1, speed: 1.1, xp_bonus: 1.0 },
+            Self::Virtue => StatModifiers { hp: 1.0, attack: 0.9, defense: 1.0, mana: 1.4, speed: 1.0, xp_bonus: 1.05 },
+
+            // Additional Elf subspecies
+            Self::BloodElf => StatModifiers { hp: 0.9, attack: 1.0, defense: 0.85, mana: 1.35, speed: 1.1, xp_bonus: 1.0 },
+            Self::MoonElf => StatModifiers { hp: 0.95, attack: 0.95, defense: 0.9, mana: 1.3, speed: 1.15, xp_bonus: 1.0 },
+            Self::SunElf => StatModifiers { hp: 1.0, attack: 1.05, defense: 0.95, mana: 1.25, speed: 1.1, xp_bonus: 1.0 },
+            Self::WildElf => StatModifiers { hp: 1.05, attack: 1.1, defense: 0.95, mana: 1.0, speed: 1.2, xp_bonus: 1.0 },
+
+            // Additional Dwarf subspecies
+            Self::GoldDwarf => StatModifiers { hp: 1.1, attack: 0.95, defense: 1.15, mana: 0.9, speed: 0.9, xp_bonus: 1.15 },
+            Self::IronDwarf => StatModifiers { hp: 1.15, attack: 1.1, defense: 1.25, mana: 0.8, speed: 0.85, xp_bonus: 1.0 },
+            Self::RuneDwarf => StatModifiers { hp: 1.0, attack: 0.95, defense: 1.1, mana: 1.2, speed: 0.9, xp_bonus: 1.0 },
+            Self::FireDwarf => StatModifiers { hp: 1.15, attack: 1.1, defense: 1.2, mana: 0.85, speed: 0.9, xp_bonus: 1.0 },
+
+            // Additional Fae subspecies
+            Self::Sylph => StatModifiers { hp: 0.65, attack: 0.75, defense: 0.65, mana: 1.3, speed: 1.5, xp_bonus: 1.0 },
+            Self::WillOWisp => StatModifiers { hp: 0.5, attack: 0.7, defense: 1.6, mana: 1.2, speed: 1.4, xp_bonus: 1.0 },
+            Self::DarkFairy => StatModifiers { hp: 0.75, attack: 1.0, defense: 0.7, mana: 1.4, speed: 1.2, xp_bonus: 1.0 },
+            Self::Leprechaun => StatModifiers { hp: 0.7, attack: 0.8, defense: 0.75, mana: 1.2, speed: 1.3, xp_bonus: 1.2 },
+
+            // Additional Human subspecies
+            Self::Northerner => StatModifiers { hp: 1.15, attack: 1.05, defense: 1.1, mana: 0.9, speed: 0.95, xp_bonus: 1.1 },
+            Self::Southerner => StatModifiers { hp: 1.0, attack: 1.0, defense: 1.0, mana: 1.05, speed: 1.1, xp_bonus: 1.1 },
+            Self::Imperial => StatModifiers { hp: 1.05, attack: 1.1, defense: 1.1, mana: 0.95, speed: 1.0, xp_bonus: 1.1 },
+            Self::Nomad => StatModifiers { hp: 1.05, attack: 1.0, defense: 0.95, mana: 1.0, speed: 1.15, xp_bonus: 1.15 },
+
+            // Dragonborn evolution subspecies
+            Self::Drake => StatModifiers { hp: 1.15, attack: 1.1, defense: 1.1, mana: 1.0, speed: 1.0, xp_bonus: 1.0 },
+            Self::Wyrm => StatModifiers { hp: 1.2, attack: 1.05, defense: 1.1, mana: 1.3, speed: 0.85, xp_bonus: 1.0 },
+            Self::TrueDragon => StatModifiers { hp: 1.3, attack: 1.2, defense: 1.2, mana: 1.2, speed: 1.0, xp_bonus: 0.9 },
+            Self::ElderDragon => StatModifiers { hp: 1.25, attack: 1.1, defense: 1.3, mana: 1.35, speed: 0.85, xp_bonus: 0.9 },
+            Self::DragonGod => StatModifiers { hp: 1.5, attack: 1.4, defense: 1.4, mana: 1.4, speed: 1.1, xp_bonus: 0.8 },
         }
     }
 
@@ -561,20 +639,47 @@ impl Subspecies {
             Self::FireDrake => vec![RacialAbility::FireBreath, RacialAbility::HeatAura],
             Self::IceDrake => vec![RacialAbility::IceBreath, RacialAbility::FrostAura],
             Self::StormDrake => vec![RacialAbility::LightningBreath, RacialAbility::StormCall],
+            Self::ShadowDrake => vec![RacialAbility::ShadowMeld, RacialAbility::DarkVision],
             Self::Pixie => vec![RacialAbility::Flight, RacialAbility::Invisibility, RacialAbility::GlamourMagic],
-            Self::Wisp => vec![RacialAbility::PhaseShift, RacialAbility::Incorporeal],
-            Self::Changeling => vec![RacialAbility::Shapeshift, RacialAbility::Mimic],
-            Self::BloodOrc => vec![RacialAbility::BloodRage, RacialAbility::LastStand],
-            Self::BloodElf => vec![RacialAbility::ManaDrain, RacialAbility::ArcaneHunger],
-            Self::Ghoul => vec![RacialAbility::ParalyzingTouch, RacialAbility::CorpseEater],
-            Self::Succubus => vec![RacialAbility::Charm, RacialAbility::LifeDrain, RacialAbility::Seduction],
-            Self::ShadowFiend => vec![RacialAbility::ShadowMeld, RacialAbility::DarkVision],
-            Self::Serpentine => vec![RacialAbility::PoisonBite, RacialAbility::Constrict],
-            Self::Wolfkin => vec![RacialAbility::PackTactics, RacialAbility::Howl, RacialAbility::Tracking],
-            Self::Catfolk => vec![RacialAbility::NightVision, RacialAbility::NineLives, RacialAbility::AlwaysLandOnFeet],
+            Self::Noble => vec![RacialAbility::Leadership],
+            Self::Barbarian => vec![RacialAbility::BloodRage],
+            Self::Ghost => vec![RacialAbility::Incorporeal, RacialAbility::PhaseShift],
+            Self::Wolf => vec![RacialAbility::PackTactics, RacialAbility::Howl, RacialAbility::Tracking],
+            Self::Cat => vec![RacialAbility::NightVision, RacialAbility::NineLives, RacialAbility::AlwaysLandOnFeet],
             Self::SeaElf => vec![RacialAbility::WaterBreathing, RacialAbility::AquaticSpeed],
-            Self::DeepDwarf => vec![RacialAbility::DarkVision, RacialAbility::StoneCunning],
-            Self::FrostDwarf => vec![RacialAbility::ColdImmunity, RacialAbility::IceWalk],
+            Self::Deep => vec![RacialAbility::DarkVision, RacialAbility::StoneCunning],
+            Self::Frost => vec![RacialAbility::ColdImmunity, RacialAbility::IceWalk],
+            // Additional Celestial subspecies
+            Self::Cherub => vec![RacialAbility::DivineShield, RacialAbility::Flight],
+            Self::Throne => vec![RacialAbility::DivineAuthority, RacialAbility::Leadership],
+            Self::Dominion => vec![RacialAbility::HolySmite, RacialAbility::DivineAuthority],
+            Self::Virtue => vec![RacialAbility::HealingLight, RacialAbility::Flight],
+            // Additional Elf subspecies
+            Self::BloodElf => vec![RacialAbility::ManaDrain, RacialAbility::ArcaneHunger],
+            Self::MoonElf => vec![RacialAbility::LunarMagic, RacialAbility::NightVision],
+            Self::SunElf => vec![RacialAbility::SolarMagic, RacialAbility::HeatAura],
+            Self::WildElf => vec![RacialAbility::NatureSurvival, RacialAbility::Tracking],
+            // Additional Dwarf subspecies
+            Self::GoldDwarf => vec![RacialAbility::GoldSense, RacialAbility::StoneCunning],
+            Self::IronDwarf => vec![RacialAbility::StoneCunning],
+            Self::RuneDwarf => vec![RacialAbility::RuneForge, RacialAbility::EnchantWeapon],
+            Self::FireDwarf => vec![RacialAbility::FireImmunity, RacialAbility::HeatAura],
+            // Additional Fae subspecies
+            Self::Sylph => vec![RacialAbility::Flight, RacialAbility::WindDash],
+            Self::WillOWisp => vec![RacialAbility::WillOWispLight, RacialAbility::Incorporeal],
+            Self::DarkFairy => vec![RacialAbility::ShadowCurse, RacialAbility::ShadowMeld],
+            Self::Leprechaun => vec![RacialAbility::LuckAura, RacialAbility::Invisibility],
+            // Additional Human subspecies
+            Self::Northerner => vec![RacialAbility::ColdResistance],
+            Self::Southerner => vec![RacialAbility::HeatResistance],
+            Self::Imperial => vec![RacialAbility::MilitaryDiscipline, RacialAbility::Leadership],
+            Self::Nomad => vec![RacialAbility::WandererInstinct, RacialAbility::Tracking],
+            // Dragonborn evolution subspecies
+            Self::Drake => vec![RacialAbility::FireBreath],
+            Self::Wyrm => vec![RacialAbility::FireBreath, RacialAbility::AncientWisdom],
+            Self::TrueDragon => vec![RacialAbility::FireBreath, RacialAbility::DragonForm, RacialAbility::Flight],
+            Self::ElderDragon => vec![RacialAbility::FireBreath, RacialAbility::AncientWisdom, RacialAbility::DragonForm, RacialAbility::Flight],
+            Self::DragonGod => vec![RacialAbility::FireBreath, RacialAbility::DragonForm, RacialAbility::Transcendence, RacialAbility::Flight, RacialAbility::AncientWisdom],
             _ => vec![],
         }
     }
@@ -694,6 +799,32 @@ pub enum RacialAbility {
     HeatAura,
     FrostAura,
     StormCall,
+
+    // Social
+    Leadership,
+
+    // Additional abilities for new subspecies
+    DivineShield,
+    DivineAuthority,
+    HolySmite,
+    HealingLight,
+    LunarMagic,
+    SolarMagic,
+    NatureSurvival,
+    RuneForge,
+    EnchantWeapon,
+    GoldSense,
+    WindDash,
+    WillOWispLight,
+    ShadowCurse,
+    LuckAura,
+    ColdResistance,
+    HeatResistance,
+    MilitaryDiscipline,
+    WandererInstinct,
+    DragonForm,
+    AncientWisdom,
+    Transcendence,
 }
 
 impl RacialAbility {
@@ -746,6 +877,29 @@ impl RacialAbility {
             Self::HeatAura => "Heat Aura",
             Self::FrostAura => "Frost Aura",
             Self::StormCall => "Storm Call",
+            Self::Leadership => "Leadership",
+            // Additional abilities for new subspecies
+            Self::DivineShield => "Divine Shield",
+            Self::DivineAuthority => "Divine Authority",
+            Self::HolySmite => "Holy Smite",
+            Self::HealingLight => "Healing Light",
+            Self::LunarMagic => "Lunar Magic",
+            Self::SolarMagic => "Solar Magic",
+            Self::NatureSurvival => "Nature Survival",
+            Self::RuneForge => "Rune Forge",
+            Self::EnchantWeapon => "Enchant Weapon",
+            Self::GoldSense => "Gold Sense",
+            Self::WindDash => "Wind Dash",
+            Self::WillOWispLight => "Will-o'-Wisp Light",
+            Self::ShadowCurse => "Shadow Curse",
+            Self::LuckAura => "Luck Aura",
+            Self::ColdResistance => "Cold Resistance",
+            Self::HeatResistance => "Heat Resistance",
+            Self::MilitaryDiscipline => "Military Discipline",
+            Self::WandererInstinct => "Wanderer Instinct",
+            Self::DragonForm => "Dragon Form",
+            Self::AncientWisdom => "Ancient Wisdom",
+            Self::Transcendence => "Transcendence",
         }
     }
 
@@ -798,6 +952,29 @@ impl RacialAbility {
             Self::HeatAura => "Nearby enemies take fire damage.",
             Self::FrostAura => "Nearby enemies are slowed.",
             Self::StormCall => "Summon lightning strikes.",
+            Self::Leadership => "Inspire allies with commanding presence.",
+            // Additional abilities for new subspecies
+            Self::DivineShield => "Project a divine barrier that absorbs damage.",
+            Self::DivineAuthority => "Command celestial forces with divine authority.",
+            Self::HolySmite => "Strike enemies with concentrated divine wrath.",
+            Self::HealingLight => "Channel divine light to heal wounds.",
+            Self::LunarMagic => "Draw power from the moon, stronger at night.",
+            Self::SolarMagic => "Channel the sun's energy, stronger during the day.",
+            Self::NatureSurvival => "Expert at surviving in the wilderness.",
+            Self::RuneForge => "Inscribe magical runes onto equipment.",
+            Self::EnchantWeapon => "Imbue weapons with magical properties.",
+            Self::GoldSense => "Detect gold and treasure nearby.",
+            Self::WindDash => "Dash through the air at incredible speed.",
+            Self::WillOWispLight => "Emit a mesmerizing light that confuses enemies.",
+            Self::ShadowCurse => "Curse enemies with debilitating shadow magic.",
+            Self::LuckAura => "Aura of luck increases gold and item find rate.",
+            Self::ColdResistance => "Natural resistance to cold damage.",
+            Self::HeatResistance => "Natural resistance to heat and fire damage.",
+            Self::MilitaryDiscipline => "Trained combat discipline reduces damage taken.",
+            Self::WandererInstinct => "Instinctive awareness of surroundings and dangers.",
+            Self::DragonForm => "Transform into a full dragon temporarily.",
+            Self::AncientWisdom => "Centuries of knowledge grant bonus mana regeneration.",
+            Self::Transcendence => "Transcend mortal limits, boosting all abilities.",
         }
     }
 }

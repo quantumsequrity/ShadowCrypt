@@ -163,7 +163,7 @@ impl Weather {
         ];
 
         let total: u32 = weights.iter().map(|(_, w)| w).sum();
-        let roll = rng.gen_range(0..total);
+        let roll = rng.r#gen_range(0..total);
         let mut sum = 0;
 
         for (weather, weight) in weights {

@@ -677,13 +677,14 @@ impl Companion {
         let mut damage = 0;
         let mut to_remove = Vec::new();
 
+        let mut heal_amount = 0;
         for (effect, duration) in self.status_effects.iter_mut() {
             match effect {
                 StatusEffect::Poison => damage += 2,
                 StatusEffect::Burn => damage += 3,
                 StatusEffect::Bleed => damage += 1,
                 StatusEffect::Regeneration => {
-                    self.heal(2);
+                    heal_amount += 2;
                 }
                 _ => {}
             }
@@ -691,6 +692,9 @@ impl Companion {
             if *duration == 0 {
                 to_remove.push(*effect);
             }
+        }
+        if heal_amount > 0 {
+            self.heal(heal_amount);
         }
 
         for effect in to_remove {
@@ -1159,6 +1163,701 @@ pub fn generate_encounters(
     }
 
     encounters
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: Extended companion features
+// ---------------------------------------------------------------------------
+
+/// Relationship level between a companion and the player
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum Relationship {
+    Hostile,
+    Unfriendly,
+    Neutral,
+    Friendly,
+    Trusted,
+    Devoted,
+    Bonded,
+}
+
+impl Relationship {
+    /// Returns the trust threshold range (min inclusive) for this relationship level
+    pub fn trust_threshold(&self) -> i32 {
+        match self {
+            Self::Hostile => -100,
+            Self::Unfriendly => -50,
+            Self::Neutral => 0,
+            Self::Friendly => 25,
+            Self::Trusted => 50,
+            Self::Devoted => 75,
+            Self::Bonded => 100,
+        }
+    }
+
+    /// Determine the relationship from a raw trust value
+    pub fn from_trust(trust: i32) -> Self {
+        if trust >= 100 {
+            Self::Bonded
+        } else if trust >= 75 {
+            Self::Devoted
+        } else if trust >= 50 {
+            Self::Trusted
+        } else if trust >= 25 {
+            Self::Friendly
+        } else if trust >= 0 {
+            Self::Neutral
+        } else if trust >= -50 {
+            Self::Unfriendly
+        } else {
+            Self::Hostile
+        }
+    }
+}
+
+/// Romance state with a companion
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum RomanceState {
+    None,
+    Interested,
+    Courting,
+    Partner,
+    Soulbound,
+}
+
+impl RomanceState {
+    /// Determine the romance state from a raw trust value
+    pub fn from_trust(trust: i32) -> Self {
+        if trust >= 120 {
+            Self::Soulbound
+        } else if trust >= 90 {
+            Self::Partner
+        } else if trust >= 60 {
+            Self::Courting
+        } else if trust >= 35 {
+            Self::Interested
+        } else {
+            Self::None
+        }
+    }
+}
+
+/// Party formation strategies
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum PartyFormation {
+    Balanced,
+    Aggressive,
+    Defensive,
+    Flanking,
+    Ambush,
+    Diamond,
+}
+
+impl PartyFormation {
+    /// Attack power modifier for this formation
+    pub fn attack_modifier(&self) -> f32 {
+        match self {
+            Self::Balanced => 1.0,
+            Self::Aggressive => 1.3,
+            Self::Defensive => 0.8,
+            Self::Flanking => 1.2,
+            Self::Ambush => 1.5,
+            Self::Diamond => 1.1,
+        }
+    }
+
+    /// Defense modifier for this formation
+    pub fn defense_modifier(&self) -> f32 {
+        match self {
+            Self::Balanced => 1.0,
+            Self::Aggressive => 0.7,
+            Self::Defensive => 1.4,
+            Self::Flanking => 0.9,
+            Self::Ambush => 0.6,
+            Self::Diamond => 1.2,
+        }
+    }
+
+    /// Speed modifier for this formation
+    pub fn speed_modifier(&self) -> f32 {
+        match self {
+            Self::Balanced => 1.0,
+            Self::Aggressive => 1.1,
+            Self::Defensive => 0.8,
+            Self::Flanking => 1.2,
+            Self::Ambush => 0.7,
+            Self::Diamond => 0.9,
+        }
+    }
+}
+
+/// Positions within a party formation
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum FormationPosition {
+    Front,
+    FrontLeft,
+    FrontRight,
+    BackLeft,
+    BackRight,
+    Rear,
+}
+
+impl FormationPosition {
+    /// Flat defense bonus granted by this position
+    pub fn defense_bonus(&self) -> i32 {
+        match self {
+            Self::Front => 2,
+            Self::FrontLeft => 1,
+            Self::FrontRight => 1,
+            Self::BackLeft => 3,
+            Self::BackRight => 3,
+            Self::Rear => 5,
+        }
+    }
+
+    /// Flat attack bonus granted by this position
+    pub fn attack_bonus(&self) -> i32 {
+        match self {
+            Self::Front => 4,
+            Self::FrontLeft => 3,
+            Self::FrontRight => 3,
+            Self::BackLeft => 1,
+            Self::BackRight => 1,
+            Self::Rear => 0,
+        }
+    }
+}
+
+/// Personality traits that affect companion interactions and compatibility
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum Personality {
+    Brave,
+    Cowardly,
+    Loyal,
+    Treacherous,
+    Kind,
+    Cruel,
+    Wise,
+    Foolish,
+    Patient,
+    Impulsive,
+    Honest,
+    Deceptive,
+    Cheerful,
+    Melancholy,
+    Stoic,
+    Passionate,
+}
+
+impl Personality {
+    /// Returns a compatibility score between two personalities (-1.0 to 1.0).
+    /// Positive values mean good compatibility, negative means conflict.
+    pub fn compatibility(&self, other: &Personality) -> f32 {
+        use Personality::*;
+        if self == other {
+            return 0.5; // Same personality: decent but not perfect
+        }
+        match (self, other) {
+            // Opposing pairs strongly conflict
+            (Brave, Cowardly) | (Cowardly, Brave) => -0.8,
+            (Loyal, Treacherous) | (Treacherous, Loyal) => -1.0,
+            (Kind, Cruel) | (Cruel, Kind) => -0.9,
+            (Wise, Foolish) | (Foolish, Wise) => -0.6,
+            (Patient, Impulsive) | (Impulsive, Patient) => -0.5,
+            (Honest, Deceptive) | (Deceptive, Honest) => -0.7,
+            (Cheerful, Melancholy) | (Melancholy, Cheerful) => -0.3,
+            (Stoic, Passionate) | (Passionate, Stoic) => -0.2,
+
+            // Harmonious combinations
+            (Brave, Loyal) | (Loyal, Brave) => 0.9,
+            (Brave, Passionate) | (Passionate, Brave) => 0.7,
+            (Kind, Loyal) | (Loyal, Kind) => 0.8,
+            (Kind, Cheerful) | (Cheerful, Kind) => 0.7,
+            (Kind, Patient) | (Patient, Kind) => 0.6,
+            (Wise, Patient) | (Patient, Wise) => 0.9,
+            (Wise, Honest) | (Honest, Wise) => 0.8,
+            (Wise, Stoic) | (Stoic, Wise) => 0.7,
+            (Honest, Loyal) | (Loyal, Honest) => 0.8,
+            (Honest, Kind) | (Kind, Honest) => 0.6,
+            (Cheerful, Passionate) | (Passionate, Cheerful) => 0.6,
+            (Stoic, Patient) | (Patient, Stoic) => 0.7,
+            (Stoic, Brave) | (Brave, Stoic) => 0.6,
+            (Stoic, Loyal) | (Loyal, Stoic) => 0.5,
+
+            // Mildly negative or toxic combos
+            (Cruel, Treacherous) | (Treacherous, Cruel) => 0.3, // villains get along
+            (Deceptive, Treacherous) | (Treacherous, Deceptive) => 0.2,
+            (Cowardly, Deceptive) | (Deceptive, Cowardly) => 0.1,
+            (Foolish, Impulsive) | (Impulsive, Foolish) => -0.4,
+            (Cruel, Impulsive) | (Impulsive, Cruel) => -0.3,
+
+            // Default: mild neutrality
+            _ => 0.0,
+        }
+    }
+}
+
+/// Types of personal quests that companions may carry
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum CompanionQuestType {
+    Redemption,
+    Revenge,
+    LostFamily,
+    ForgottenMemory,
+    AncientPower,
+    PersonalRival,
+    HomeDefense,
+    SacredOath,
+}
+
+/// Template for a pre-defined, named companion
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct CompanionTemplate {
+    pub name: String,
+    pub kind: CompanionKind,
+    pub rarity: CompanionRarity,
+    pub personality: Personality,
+    pub backstory: String,
+    pub can_romance: bool,
+    pub personal_quest: Option<CompanionQuestType>,
+    pub base_hp: i32,
+    pub base_attack: i32,
+    pub base_defense: i32,
+}
+
+/// Returns a collection of 33 pre-defined, lore-rich companions
+pub fn predefined_companions() -> Vec<CompanionTemplate> {
+    vec![
+        // 1
+        CompanionTemplate {
+            name: "Kael the Shadowblade".into(),
+            kind: CompanionKind::GoblinRogue,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Brave,
+            backstory: "Once a feared assassin of the Nighthollow Guild, Kael turned from the shadows after a contract forced him to betray his only friend.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::Revenge),
+            base_hp: 38,
+            base_attack: 16,
+            base_defense: 4,
+        },
+        // 2
+        CompanionTemplate {
+            name: "Lyra Moonwhisper".into(),
+            kind: CompanionKind::Sprite,
+            rarity: CompanionRarity::Epic,
+            personality: Personality::Kind,
+            backstory: "A fairy healer exiled from the Moonpetal Court after she dared heal a mortal child, breaking the ancient covenant of non-interference.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::LostFamily),
+            base_hp: 28,
+            base_attack: 8,
+            base_defense: 3,
+        },
+        // 3
+        CompanionTemplate {
+            name: "Grimjaw".into(),
+            kind: CompanionKind::OrcWarrior,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Stoic,
+            backstory: "A scarred orc veteran who speaks little but fights with the fury of a storm. He seeks to duel the warlord who slaughtered his clan.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::PersonalRival),
+            base_hp: 65,
+            base_attack: 15,
+            base_defense: 7,
+        },
+        // 4
+        CompanionTemplate {
+            name: "Sister Meridia".into(),
+            kind: CompanionKind::AngelicGuardian,
+            rarity: CompanionRarity::Legendary,
+            personality: Personality::Wise,
+            backstory: "A cleric who heard the whisper of a dying god and abandoned her temple to fulfil a sacred oath that may cost her mortality.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::SacredOath),
+            base_hp: 72,
+            base_attack: 14,
+            base_defense: 12,
+        },
+        // 5
+        CompanionTemplate {
+            name: "Zix".into(),
+            kind: CompanionKind::ImpServant,
+            rarity: CompanionRarity::Common,
+            personality: Personality::Cheerful,
+            backstory: "A mischievous imp who broke his infernal contract and now seeks redemption through acts of reluctant heroism and terrible puns.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::Redemption),
+            base_hp: 22,
+            base_attack: 10,
+            base_defense: 2,
+        },
+        // 6
+        CompanionTemplate {
+            name: "Fenris Ironclaw".into(),
+            kind: CompanionKind::DireWolf,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Loyal,
+            backstory: "The last of a dire wolf pack bonded to an ancient ranger order. He searches tirelessly for the descendants of his fallen master.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::LostFamily),
+            base_hp: 50,
+            base_attack: 14,
+            base_defense: 5,
+        },
+        // 7
+        CompanionTemplate {
+            name: "Ashara Emberveil".into(),
+            kind: CompanionKind::Phoenix,
+            rarity: CompanionRarity::Epic,
+            personality: Personality::Passionate,
+            backstory: "Born from the final ember of a dying volcano, Ashara carries within her the memory of a civilisation consumed by flame.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::ForgottenMemory),
+            base_hp: 62,
+            base_attack: 19,
+            base_defense: 6,
+        },
+        // 8
+        CompanionTemplate {
+            name: "Thorn".into(),
+            kind: CompanionKind::EarthElemental,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Patient,
+            backstory: "An earth elemental awakened by a druid's dying spell, Thorn guards the threshold between the living forest and the blighted wastes.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::HomeDefense),
+            base_hp: 90,
+            base_attack: 9,
+            base_defense: 14,
+        },
+        // 9
+        CompanionTemplate {
+            name: "Vesper Nightshade".into(),
+            kind: CompanionKind::Wraith,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Melancholy,
+            backstory: "A noblewoman murdered on her wedding night who now drifts through the dungeon, unable to remember her own name but driven by fragments of sorrow.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::ForgottenMemory),
+            base_hp: 32,
+            base_attack: 17,
+            base_defense: 3,
+        },
+        // 10
+        CompanionTemplate {
+            name: "Brok Stoneshield".into(),
+            kind: CompanionKind::Golem,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Stoic,
+            backstory: "Forged by dwarven runesmiths to guard a treasury that no longer exists, Brok now seeks a new purpose worthy of his unyielding frame.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::AncientPower),
+            base_hp: 110,
+            base_attack: 11,
+            base_defense: 16,
+        },
+        // 11
+        CompanionTemplate {
+            name: "Pip Thistlewick".into(),
+            kind: CompanionKind::Wisp,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Cheerful,
+            backstory: "A wisp born from a child's laughter that got lost in the Underhollow. Pip lights the way and hums half-remembered lullabies.".into(),
+            can_romance: false,
+            personal_quest: None,
+            base_hp: 16,
+            base_attack: 5,
+            base_defense: 1,
+        },
+        // 12
+        CompanionTemplate {
+            name: "Raziel Duskmantle".into(),
+            kind: CompanionKind::FaeDragon,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Deceptive,
+            backstory: "A fae dragon exiled from the Feywild for weaving illusions so convincing they nearly toppled a sidhe court.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::Redemption),
+            base_hp: 42,
+            base_attack: 15,
+            base_defense: 5,
+        },
+        // 13
+        CompanionTemplate {
+            name: "Helga Bloodfury".into(),
+            kind: CompanionKind::Bear,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Brave,
+            backstory: "A battle-scarred cave bear who once fought alongside the berserker clans of the Frostpeak Mountains. Her roar can shake the stone.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::PersonalRival),
+            base_hp: 78,
+            base_attack: 13,
+            base_defense: 9,
+        },
+        // 14
+        CompanionTemplate {
+            name: "Corvus the Bleak".into(),
+            kind: CompanionKind::Ghost,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Honest,
+            backstory: "The ghost of a judge who refused to condemn an innocent man and was executed in his place. He now speaks only truths, however painful.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::Revenge),
+            base_hp: 26,
+            base_attack: 13,
+            base_defense: 1,
+        },
+        // 15
+        CompanionTemplate {
+            name: "Solara Dawnfire".into(),
+            kind: CompanionKind::FireSprite,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Impulsive,
+            backstory: "A fire sprite who escaped the Elemental Furnace. She acts first and thinks later, leaving a trail of small fires and apologies.".into(),
+            can_romance: true,
+            personal_quest: None,
+            base_hp: 27,
+            base_attack: 15,
+            base_defense: 2,
+        },
+        // 16
+        CompanionTemplate {
+            name: "Morvaine".into(),
+            kind: CompanionKind::DemonHound,
+            rarity: CompanionRarity::Epic,
+            personality: Personality::Loyal,
+            backstory: "A hellhound who broke its chains when its demon master ordered it to devour children. Morvaine now serves those who show it mercy.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::Redemption),
+            base_hp: 48,
+            base_attack: 23,
+            base_defense: 5,
+        },
+        // 17
+        CompanionTemplate {
+            name: "Celeste".into(),
+            kind: CompanionKind::Unicorn,
+            rarity: CompanionRarity::Legendary,
+            personality: Personality::Kind,
+            backstory: "The last unicorn of the Silverglade, Celeste wanders the dark places of the world searching for a heart pure enough to restore her forest.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::HomeDefense),
+            base_hp: 58,
+            base_attack: 13,
+            base_defense: 7,
+        },
+        // 18
+        CompanionTemplate {
+            name: "Skarn".into(),
+            kind: CompanionKind::SkeletonWarrior,
+            rarity: CompanionRarity::Common,
+            personality: Personality::Patient,
+            backstory: "A skeleton warrior who remembers nothing of his life but retains an instinctive mastery of sword and shield forged over centuries of undeath.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::ForgottenMemory),
+            base_hp: 36,
+            base_attack: 11,
+            base_defense: 7,
+        },
+        // 19
+        CompanionTemplate {
+            name: "Tempest".into(),
+            kind: CompanionKind::StormElemental,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Passionate,
+            backstory: "Torn from a hurricane by a sorcerer's binding, Tempest rages against captivity yet finds strange kinship with those who fight for freedom.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::AncientPower),
+            base_hp: 37,
+            base_attack: 17,
+            base_defense: 4,
+        },
+        // 20
+        CompanionTemplate {
+            name: "Mira Frostbloom".into(),
+            kind: CompanionKind::IceElemental,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Melancholy,
+            backstory: "An ice elemental formed from a frozen tear. Mira remembers the warmth of a love she never had and shields allies with walls of sorrow-ice.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::LostFamily),
+            base_hp: 47,
+            base_attack: 11,
+            base_defense: 9,
+        },
+        // 21
+        CompanionTemplate {
+            name: "Aldric the Fallen".into(),
+            kind: CompanionKind::SkeletonWarrior,
+            rarity: CompanionRarity::Common,
+            personality: Personality::Brave,
+            backstory: "A paladin raised as undead against his will. Aldric clings to the tenets of his faith even as his bones crumble, seeking final rest through valor.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::SacredOath),
+            base_hp: 40,
+            base_attack: 12,
+            base_defense: 8,
+        },
+        // 22
+        CompanionTemplate {
+            name: "Nyx Venomtail".into(),
+            kind: CompanionKind::Panther,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Deceptive,
+            backstory: "A shadow panther from the Abyssal Jungle whose venom can melt steel. She chose her current master after he bested her in a game of wits.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::PersonalRival),
+            base_hp: 33,
+            base_attack: 16,
+            base_defense: 3,
+        },
+        // 23
+        CompanionTemplate {
+            name: "Brother Ashwin".into(),
+            kind: CompanionKind::Golem,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Wise,
+            backstory: "A clay golem inscribed with the prayers of a hundred monks. He moves slowly but carries the collected wisdom of a monastery now buried under sand.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::ForgottenMemory),
+            base_hp: 105,
+            base_attack: 10,
+            base_defense: 15,
+        },
+        // 24
+        CompanionTemplate {
+            name: "Sera Windrider".into(),
+            kind: CompanionKind::GiantEagle,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Honest,
+            backstory: "A giant eagle bonded to a sky-nomad tribe. Sera descended into the dungeon to find the stolen egg of her sister and will not leave without it.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::LostFamily),
+            base_hp: 37,
+            base_attack: 13,
+            base_defense: 4,
+        },
+        // 25
+        CompanionTemplate {
+            name: "Vex".into(),
+            kind: CompanionKind::GoblinRogue,
+            rarity: CompanionRarity::Common,
+            personality: Personality::Treacherous,
+            backstory: "A goblin information broker who sells secrets to every side. Vex is useful but should never be trusted with anything sharper than a spoon.".into(),
+            can_romance: false,
+            personal_quest: None,
+            base_hp: 24,
+            base_attack: 13,
+            base_defense: 2,
+        },
+        // 26
+        CompanionTemplate {
+            name: "Ignis Char".into(),
+            kind: CompanionKind::DragonWhelp,
+            rarity: CompanionRarity::Epic,
+            personality: Personality::Impulsive,
+            backstory: "A young dragon who hatched prematurely during a siege and imprinted on the first voice it heard. Ignis is powerful, hungry, and easily distracted by shiny objects.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::AncientPower),
+            base_hp: 55,
+            base_attack: 21,
+            base_defense: 9,
+        },
+        // 27
+        CompanionTemplate {
+            name: "Thessaly".into(),
+            kind: CompanionKind::Wolf,
+            rarity: CompanionRarity::Common,
+            personality: Personality::Loyal,
+            backstory: "A common grey wolf who followed a wounded traveler for three days until they were safe. She has never left their side since.".into(),
+            can_romance: false,
+            personal_quest: None,
+            base_hp: 26,
+            base_attack: 9,
+            base_defense: 3,
+        },
+        // 28
+        CompanionTemplate {
+            name: "Oberon Mistwalker".into(),
+            kind: CompanionKind::FaeDragon,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Foolish,
+            backstory: "A fae dragon who wanders between realms with cheerful incompetence, accidentally opening portals and leaving chaos in his glittering wake.".into(),
+            can_romance: false,
+            personal_quest: None,
+            base_hp: 40,
+            base_attack: 13,
+            base_defense: 4,
+        },
+        // 29
+        CompanionTemplate {
+            name: "Dame Ulra".into(),
+            kind: CompanionKind::EarthElemental,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Brave,
+            backstory: "Once a human knight who merged with the earth after a catastrophic spell. Dame Ulra still honours her vows, shielding the innocent with walls of stone.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::SacredOath),
+            base_hp: 85,
+            base_attack: 9,
+            base_defense: 13,
+        },
+        // 30
+        CompanionTemplate {
+            name: "Whisper".into(),
+            kind: CompanionKind::Ghost,
+            rarity: CompanionRarity::Uncommon,
+            personality: Personality::Cowardly,
+            backstory: "The timid ghost of a librarian who hides behind bookshelves that no longer exist. She can read any language and is terrified of loud noises.".into(),
+            can_romance: false,
+            personal_quest: None,
+            base_hp: 22,
+            base_attack: 10,
+            base_defense: 0,
+        },
+        // 31
+        CompanionTemplate {
+            name: "Rask Cindermaw".into(),
+            kind: CompanionKind::DemonHound,
+            rarity: CompanionRarity::Epic,
+            personality: Personality::Cruel,
+            backstory: "A demonic beast that hunts for sport. Rask respects only strength and will turn on any master it deems weak.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::PersonalRival),
+            base_hp: 50,
+            base_attack: 24,
+            base_defense: 4,
+        },
+        // 32
+        CompanionTemplate {
+            name: "Elara Starweave".into(),
+            kind: CompanionKind::Sprite,
+            rarity: CompanionRarity::Common,
+            personality: Personality::Patient,
+            backstory: "A sprite who tends wounded creatures in the dungeon depths. She joined the adventurer to ensure fewer things die needlessly in the dark.".into(),
+            can_romance: true,
+            personal_quest: Some(CompanionQuestType::HomeDefense),
+            base_hp: 20,
+            base_attack: 6,
+            base_defense: 2,
+        },
+        // 33
+        CompanionTemplate {
+            name: "Mordecai Ashvane".into(),
+            kind: CompanionKind::Wraith,
+            rarity: CompanionRarity::Rare,
+            personality: Personality::Wise,
+            backstory: "An ancient scholar who willingly became a wraith to preserve the knowledge of a dying age. He seeks apprentices worthy of inheriting his forbidden lore.".into(),
+            can_romance: false,
+            personal_quest: Some(CompanionQuestType::AncientPower),
+            base_hp: 34,
+            base_attack: 16,
+            base_defense: 3,
+        },
+    ]
 }
 
 #[cfg(test)]

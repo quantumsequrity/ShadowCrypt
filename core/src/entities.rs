@@ -712,7 +712,7 @@ impl SatiationBonus {
 }
 
 /// All enemy types in the game
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum EnemyKind {
     // Tier 1: Dungeon (levels 1-4)
     Rat,
@@ -812,6 +812,67 @@ pub enum EnemyKind {
     AncientWyrm,
     FrostLord,
     InfernalLord,
+
+    // Elf enemies (6)
+    ElfScout,
+    ElfMage,
+    ElfGuard,
+    ElfArcher,
+    ElfBlade,
+    ElfLord,
+
+    // Dwarf enemies (5)
+    DwarfMiner,
+    DwarfGuard,
+    DwarfRunesmith,
+    DwarfBerserker,
+    DwarfKing,
+
+    // Dragon enemies (6)
+    Whelpling,
+    YoungDragon,
+    AdultDragon,
+    AncientDragon,
+    DragonLord,
+    DragonGod,
+
+    // Aberrations (5)
+    Beholder,
+    MindFlayer,
+    Aboleth,
+    Gibbering,
+    Otyugh,
+
+    // Celestials (3)
+    FallenAngel,
+    CorruptSeraph,
+    DarkArchon,
+
+    // Fey (7)
+    Satyr,
+    Redcap,
+    Hag,
+    // Note: Banshee already exists above in Tier 3
+    WillOWisp,
+    Treant,
+    Erlking,
+
+    // Beasts (9) - DireWolf and GiantSpider already exist above
+    // DireWolf - already exists in Tier 4
+    // GiantSpider - already exists in Tier 2
+    Basilisk,
+    Manticore,
+    Chimera,
+    Hydra,
+    Griffon,
+    Wyvern,
+    Roc,
+
+    // Constructs (4)
+    IronGolem,
+    StoneGolem,
+    ClockworkSoldier,
+    AnimatedArmor,
 }
 
 impl EnemyKind {
@@ -887,6 +948,46 @@ impl EnemyKind {
             Self::BossForestGuardian | Self::AncientWyrm => 'G',
             Self::BossIceDragon | Self::FrostLord => 'D',
             Self::BossDemonKing | Self::InfernalLord => '&',
+            // Elf enemies
+            Self::ElfScout | Self::ElfArcher => 'e',
+            Self::ElfMage => 'E',
+            Self::ElfGuard | Self::ElfBlade => 'e',
+            Self::ElfLord => 'E',
+            // Dwarf enemies
+            Self::DwarfMiner | Self::DwarfGuard => 'd',
+            Self::DwarfRunesmith | Self::DwarfBerserker => 'd',
+            Self::DwarfKing => 'D',
+            // Dragon enemies
+            Self::Whelpling => 'w',
+            Self::YoungDragon | Self::AdultDragon => 'D',
+            Self::AncientDragon | Self::DragonLord | Self::DragonGod => 'D',
+            // Aberrations
+            Self::Beholder => 'e',
+            Self::MindFlayer => 'M',
+            Self::Aboleth => 'A',
+            Self::Gibbering => 'g',
+            Self::Otyugh => 'O',
+            // Celestials
+            Self::FallenAngel | Self::CorruptSeraph | Self::DarkArchon => 'A',
+            // Fey
+            Self::Satyr => 's',
+            Self::Redcap => 'r',
+            Self::Hag => 'H',
+            Self::WillOWisp => 'o',
+            Self::Treant => 'T',
+            Self::Erlking => 'E',
+            // Beasts
+            Self::Basilisk => 'B',
+            Self::Manticore => 'M',
+            Self::Chimera => 'C',
+            Self::Hydra => 'H',
+            Self::Griffon => 'G',
+            Self::Wyvern => 'W',
+            Self::Roc => 'R',
+            // Constructs
+            Self::IronGolem | Self::StoneGolem => 'G',
+            Self::ClockworkSoldier => 'C',
+            Self::AnimatedArmor => 'A',
         }
     }
 
@@ -925,6 +1026,22 @@ impl EnemyKind {
             Self::Succubus | Self::ShadowDemon => 13,
             Self::AbyssalHorror => 4,
             Self::AncientWyrm => 5,
+            // New enemy types - use sensible color defaults
+            Self::ElfScout | Self::ElfMage | Self::ElfGuard | Self::ElfArcher
+            | Self::ElfBlade | Self::ElfLord => 5, // Green (elven)
+            Self::DwarfMiner | Self::DwarfGuard | Self::DwarfRunesmith
+            | Self::DwarfBerserker | Self::DwarfKing => 6, // Brown
+            Self::Whelpling | Self::YoungDragon | Self::AdultDragon
+            | Self::AncientDragon | Self::DragonLord | Self::DragonGod => 3, // Red (draconic)
+            Self::Beholder | Self::MindFlayer | Self::Aboleth
+            | Self::Gibbering | Self::Otyugh => 13, // Magenta (aberrant)
+            Self::FallenAngel | Self::CorruptSeraph | Self::DarkArchon => 11, // Yellow (celestial/corrupt)
+            Self::Satyr | Self::Redcap | Self::Hag
+            | Self::WillOWisp | Self::Treant | Self::Erlking => 5, // Green (fey)
+            Self::Basilisk | Self::Manticore | Self::Chimera | Self::Hydra
+            | Self::Griffon | Self::Wyvern | Self::Roc => 6, // Brown (bestial)
+            Self::IronGolem | Self::StoneGolem | Self::ClockworkSoldier
+            | Self::AnimatedArmor => 1, // Grey (construct)
         }
     }
 
@@ -1010,6 +1127,56 @@ impl EnemyKind {
             Self::AncientWyrm => "Ancient Wyrm",
             Self::FrostLord => "Frost Lord",
             Self::InfernalLord => "Infernal Lord",
+            // Elf enemies
+            Self::ElfScout => "Elf Scout",
+            Self::ElfMage => "Elf Mage",
+            Self::ElfGuard => "Elf Guard",
+            Self::ElfArcher => "Elf Archer",
+            Self::ElfBlade => "Elf Blade",
+            Self::ElfLord => "Elf Lord",
+            // Dwarf enemies
+            Self::DwarfMiner => "Dwarf Miner",
+            Self::DwarfGuard => "Dwarf Guard",
+            Self::DwarfRunesmith => "Dwarf Runesmith",
+            Self::DwarfBerserker => "Dwarf Berserker",
+            Self::DwarfKing => "Dwarf King",
+            // Dragon enemies
+            Self::Whelpling => "Whelpling",
+            Self::YoungDragon => "Young Dragon",
+            Self::AdultDragon => "Adult Dragon",
+            Self::AncientDragon => "Ancient Dragon",
+            Self::DragonLord => "Dragon Lord",
+            Self::DragonGod => "Dragon God",
+            // Aberrations
+            Self::Beholder => "Beholder",
+            Self::MindFlayer => "Mind Flayer",
+            Self::Aboleth => "Aboleth",
+            Self::Gibbering => "Gibbering Mouther",
+            Self::Otyugh => "Otyugh",
+            // Celestials
+            Self::FallenAngel => "Fallen Angel",
+            Self::CorruptSeraph => "Corrupt Seraph",
+            Self::DarkArchon => "Dark Archon",
+            // Fey
+            Self::Satyr => "Satyr",
+            Self::Redcap => "Redcap",
+            Self::Hag => "Hag",
+            Self::WillOWisp => "Will-o'-Wisp",
+            Self::Treant => "Treant",
+            Self::Erlking => "Erlking",
+            // Beasts
+            Self::Basilisk => "Basilisk",
+            Self::Manticore => "Manticore",
+            Self::Chimera => "Chimera",
+            Self::Hydra => "Hydra",
+            Self::Griffon => "Griffon",
+            Self::Wyvern => "Wyvern",
+            Self::Roc => "Roc",
+            // Constructs
+            Self::IronGolem => "Iron Golem",
+            Self::StoneGolem => "Stone Golem",
+            Self::ClockworkSoldier => "Clockwork Soldier",
+            Self::AnimatedArmor => "Animated Armor",
         }
     }
 
@@ -1114,6 +1281,64 @@ impl EnemyKind {
             Self::AncientWyrm => (500, 40, 22, 1800),
             Self::FrostLord => (700, 48, 28, 3500),
             Self::InfernalLord => (900, 55, 32, 5500),
+
+            // Elf enemies (mid-tier, fast and agile)
+            Self::ElfScout => (35, 12, 4, 40),
+            Self::ElfMage => (30, 18, 3, 55),
+            Self::ElfGuard => (50, 14, 8, 50),
+            Self::ElfArcher => (40, 16, 5, 55),
+            Self::ElfBlade => (60, 20, 6, 70),
+            Self::ElfLord => (150, 30, 15, 200),
+
+            // Dwarf enemies (mid-tier, tanky)
+            Self::DwarfMiner => (45, 10, 6, 35),
+            Self::DwarfGuard => (70, 14, 12, 60),
+            Self::DwarfRunesmith => (55, 16, 10, 75),
+            Self::DwarfBerserker => (80, 22, 8, 90),
+            Self::DwarfKing => (200, 28, 20, 250),
+
+            // Dragon enemies (high-tier, very powerful)
+            Self::Whelpling => (30, 10, 4, 25),
+            Self::YoungDragon => (80, 22, 10, 120),
+            Self::AdultDragon => (200, 35, 20, 300),
+            Self::AncientDragon => (500, 50, 30, 600),
+            Self::DragonLord => (800, 60, 35, 800),
+            Self::DragonGod => (1500, 75, 45, 1200),
+
+            // Aberrations (mid-to-high tier, special abilities)
+            Self::Beholder => (100, 30, 10, 180),
+            Self::MindFlayer => (80, 35, 8, 200),
+            Self::Aboleth => (150, 28, 15, 220),
+            Self::Gibbering => (60, 15, 5, 80),
+            Self::Otyugh => (90, 18, 12, 100),
+
+            // Celestials (high-tier, holy-themed)
+            Self::FallenAngel => (180, 40, 20, 350),
+            Self::CorruptSeraph => (250, 50, 25, 500),
+            Self::DarkArchon => (400, 60, 35, 700),
+
+            // Fey (varied tier, magical)
+            Self::Satyr => (40, 12, 4, 40),
+            Self::Redcap => (50, 18, 6, 60),
+            Self::Hag => (70, 22, 8, 100),
+            Self::WillOWisp => (25, 20, 2, 80),
+            Self::Treant => (120, 16, 18, 130),
+            Self::Erlking => (200, 35, 20, 300),
+
+            // Beasts (varied tier)
+            Self::Basilisk => (80, 18, 10, 100),
+            Self::Manticore => (100, 24, 12, 150),
+            Self::Chimera => (130, 28, 14, 200),
+            Self::Hydra => (200, 22, 16, 250),
+            Self::Griffon => (90, 20, 10, 120),
+            Self::Wyvern => (110, 26, 12, 160),
+            Self::Roc => (160, 30, 14, 220),
+
+            // Constructs (tanky, slow)
+            Self::IronGolem => (200, 22, 24, 240),
+            Self::StoneGolem => (180, 20, 22, 220),
+            Self::ClockworkSoldier => (100, 18, 16, 150),
+            Self::AnimatedArmor => (80, 16, 20, 120),
         }
     }
 
@@ -1219,7 +1444,15 @@ impl EnemyKind {
             | Self::Mushroom | Self::VenomousVine | Self::GiantWasp
             | Self::YetiWarrior | Self::Wendigo | Self::CaveCrawler => EntityFaction::Wild,
 
-            // Default neutral
+            // Beast faction (new beasts)
+            Self::Basilisk | Self::Manticore | Self::Chimera | Self::Hydra
+            | Self::Griffon | Self::Wyvern | Self::Roc | Self::Whelpling => EntityFaction::Beast,
+
+            // Elemental faction (new constructs)
+            Self::IronGolem | Self::StoneGolem | Self::ClockworkSoldier
+            | Self::AnimatedArmor => EntityFaction::Elemental,
+
+            // Default neutral (elves, dwarves, fey, aberrations, celestials, etc.)
             _ => EntityFaction::Neutral,
         }
     }
@@ -1441,7 +1674,7 @@ impl Enemy {
     }
 
     /// Decide what action to take autonomously
-    pub fn decide_action(&self, enemies: &[Enemy], player_pos: (usize, usize), map_visible: &[[bool; 100]; 45]) -> EntityAction {
+    pub fn decide_action(&self, enemies: &[Enemy], player_pos: (usize, usize), map_visible: &Vec<Vec<bool>>) -> EntityAction {
         // Check if stunned or frozen
         if self.has_status(StatusEffect::Stun) || self.has_status(StatusEffect::Freeze) {
             return EntityAction::Wait;
@@ -1769,18 +2002,18 @@ pub struct Player {
 impl Player {
     /// Create a new player
     pub fn new(x: usize, y: usize, class: CharacterClass) -> Self {
-        let (hp, attack, defense, mana, speed) = class.base_stats();
+        let stats = class.base_stats();
         Self {
             x,
             y,
             class,
-            hp,
-            max_hp: hp,
-            mana,
-            max_mana: mana,
-            base_attack: attack,
-            base_defense: defense,
-            speed,
+            hp: stats.hp,
+            max_hp: stats.hp,
+            mana: stats.mana,
+            max_mana: stats.mana,
+            base_attack: stats.attack,
+            base_defense: stats.defense,
+            speed: stats.speed,
             gold: 0,
             level: 1,
             xp: 0,

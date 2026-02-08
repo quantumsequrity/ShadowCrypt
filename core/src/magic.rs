@@ -4,7 +4,7 @@ use crate::classes::CharacterClass;
 use serde::{Serialize, Deserialize};
 
 /// Available skills in the game
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum Skill {
     // Warrior
     Berserk,
@@ -102,6 +102,8 @@ impl Skill {
             CharacterClass::Paladin => vec![Self::HolyLight, Self::DivineShield, Self::Smite, Self::Consecrate],
             CharacterClass::Ranger => vec![Self::MultiShot, Self::PoisonArrow, Self::TrapSet, Self::EagleEye],
             CharacterClass::Necromancer => vec![Self::RaiseDead, Self::LifeDrain, Self::Curse, Self::DarkPact],
+            CharacterClass::Cleric => vec![Self::HolyLight, Self::DivineShield, Self::Consecrate, Self::Smite],
+            CharacterClass::Monk => vec![Self::Berserk, Self::Cleave, Self::ShieldBash, Self::Whirlwind],
         }
     }
 }

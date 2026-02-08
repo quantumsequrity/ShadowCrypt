@@ -24,6 +24,8 @@ pub enum CharacterClass {
     Cleric,
     Ranger,
     Monk,
+    Paladin,
+    Necromancer,
 }
 
 impl CharacterClass {
@@ -35,6 +37,8 @@ impl CharacterClass {
             Self::Cleric => "Cleric",
             Self::Ranger => "Ranger",
             Self::Monk => "Monk",
+            Self::Paladin => "Paladin",
+            Self::Necromancer => "Necromancer",
         }
     }
 
@@ -46,6 +50,8 @@ impl CharacterClass {
             Self::Cleric => "Divine servants who channel holy power to heal allies and smite foes.",
             Self::Ranger => "Skilled trackers and marksmen who thrive in the wilderness.",
             Self::Monk => "Disciplined martial artists who harness inner energy for combat.",
+            Self::Paladin => "Holy warriors blessed with divine protection and healing abilities.",
+            Self::Necromancer => "Dark sorcerers who command undead forces and drain life energy.",
         }
     }
 
@@ -58,6 +64,8 @@ impl CharacterClass {
             Self::Cleric => ClassStats::new(95, 10, 10, 120, 6, 5.0),
             Self::Ranger => ClassStats::new(90, 14, 8, 60, 12, 12.0),
             Self::Monk => ClassStats::new(100, 13, 9, 80, 14, 8.0),
+            Self::Paladin => ClassStats::new(110, 12, 14, 60, 7, 5.0),
+            Self::Necromancer => ClassStats::new(75, 10, 6, 130, 8, 8.0),
         }
     }
 
@@ -69,6 +77,41 @@ impl CharacterClass {
             Self::Cleric => Attribute::Wisdom,
             Self::Ranger => Attribute::Agility,
             Self::Monk => Attribute::Dexterity,
+            Self::Paladin => Attribute::Constitution,
+            Self::Necromancer => Attribute::Intelligence,
+        }
+    }
+
+    /// Returns the special ability name for this class
+    pub fn special_ability(&self) -> &'static str {
+        match self {
+            Self::Warrior => "Berserk",
+            Self::Mage => "Fireball",
+            Self::Rogue => "Backstab",
+            Self::Cleric => "Heal",
+            Self::Ranger => "Multi Shot",
+            Self::Monk => "Chi Strike",
+            Self::Paladin => "Holy Light",
+            Self::Necromancer => "Raise Dead",
+        }
+    }
+
+    /// Returns base elemental resistances for the class
+    pub fn elemental_resistances(&self) -> crate::combat::ElementalResistances {
+        match self {
+            Self::Paladin => crate::combat::ElementalResistances {
+                holy: 25, shadow: -10, ..Default::default()
+            },
+            Self::Necromancer => crate::combat::ElementalResistances {
+                shadow: 25, holy: -10, poison: 15, ..Default::default()
+            },
+            Self::Mage => crate::combat::ElementalResistances {
+                arcane: 10, ..Default::default()
+            },
+            Self::Cleric => crate::combat::ElementalResistances {
+                holy: 15, ..Default::default()
+            },
+            _ => crate::combat::ElementalResistances::default(),
         }
     }
 
@@ -111,6 +154,13 @@ impl CharacterClass {
                 Specialization::IronBody,
                 Specialization::WayOfShadows,
             ],
+            Self::Paladin => vec![
+                Specialization::Crusader,
+                Specialization::Guardian,
+            ],
+            Self::Necromancer => vec![
+                Specialization::Necromancer,
+            ],
         }
     }
 
@@ -122,6 +172,8 @@ impl CharacterClass {
             Self::Cleric,
             Self::Ranger,
             Self::Monk,
+            Self::Paladin,
+            Self::Necromancer,
         ]
         .into_iter()
     }

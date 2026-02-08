@@ -571,7 +571,7 @@ impl Rarity {
 }
 
 /// All item types in the game
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum ItemKind {
     // Potions (20)
     HealthPotion,
@@ -761,6 +761,15 @@ pub enum ItemKind {
     DragonSteak,
     FeastOfKings,
 
+    // Minigame resources
+    Fish,
+    RareFish,
+    LegendaryFish,
+    OreChunk,
+    GemFragment,
+    PerfectGem,
+    TournamentReward,
+
     // Special (10)
     Gold,
     Key,
@@ -851,6 +860,11 @@ impl ItemKind {
             | Self::Mushrooms | Self::RawPoultry | Self::CookedMeat | Self::GrilledFish
             | Self::Stew | Self::Omelette | Self::RoastChicken | Self::MeatPie
             | Self::FruitSalad | Self::HeartyStew | Self::DragonSteak | Self::FeastOfKings => '%',
+
+            // Minigame resources
+            Self::Fish | Self::RareFish | Self::LegendaryFish => 'f',
+            Self::OreChunk | Self::GemFragment | Self::PerfectGem => 'g',
+            Self::TournamentReward => 'T',
 
             // Special
             Self::Gold => '$',
@@ -1046,6 +1060,13 @@ impl ItemKind {
             Self::DragonSteak => "Dragon Steak",
             Self::FeastOfKings => "Feast of Kings",
 
+            Self::Fish => "Fish",
+            Self::RareFish => "Rare Fish",
+            Self::LegendaryFish => "Legendary Fish",
+            Self::OreChunk => "Ore Chunk",
+            Self::GemFragment => "Gem Fragment",
+            Self::PerfectGem => "Perfect Gem",
+            Self::TournamentReward => "Tournament Reward",
             Self::Gold => "Gold",
             Self::Key => "Key",
             Self::Bomb => "Bomb",

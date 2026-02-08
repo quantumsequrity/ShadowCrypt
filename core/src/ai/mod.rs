@@ -1647,6 +1647,8 @@ impl AIProfile {
             CharacterClass::Paladin => Self::paladin(),
             CharacterClass::Ranger => Self::ranger(),
             CharacterClass::Necromancer => Self::necromancer(),
+            CharacterClass::Cleric => Self::paladin(),
+            CharacterClass::Monk => Self::warrior(),
         }
     }
 

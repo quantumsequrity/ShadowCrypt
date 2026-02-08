@@ -54,6 +54,43 @@ impl DialogueChoice {
     }
 }
 
+/// A response option in a dialogue (alternative struct with string-based conditions)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct DialogueResponse {
+    /// The text displayed for this response
+    pub text: String,
+    /// The node to transition to when this response is selected (None = end dialogue)
+    pub next_node: Option<u32>,
+    /// Optional condition that must be met for this response to appear
+    pub condition: Option<DialogueCondition>,
+    /// Optional action to trigger when this response is selected
+    pub action: Option<DialogueAction>,
+}
+
+impl DialogueResponse {
+    /// Create a new dialogue response
+    pub fn new(text: impl Into<String>, next_node: Option<u32>) -> Self {
+        Self {
+            text: text.into(),
+            next_node,
+            condition: None,
+            action: None,
+        }
+    }
+
+    /// Set a condition on this response
+    pub fn with_condition(mut self, condition: DialogueCondition) -> Self {
+        self.condition = Some(condition);
+        self
+    }
+
+    /// Set an action on this response
+    pub fn with_action(mut self, action: DialogueAction) -> Self {
+        self.action = Some(action);
+        self
+    }
+}
+
 /// Actions that can be triggered by dialogue choices
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub enum DialogueAction {
@@ -89,6 +126,22 @@ pub enum DialogueAction {
     IdentifyItems,
     /// Rest and restore some HP/mana
     Rest,
+    /// Give a named quest (by string identifier)
+    GiveQuest(String),
+    /// NPC joins the player's party
+    JoinParty,
+    /// Initiate combat with the NPC
+    Fight,
+    /// Teach the player a named skill
+    TeachSkill(String),
+    /// Reveal a piece of lore
+    RevealLore(String),
+    /// Teleport the player to a location
+    Teleport,
+    /// Remove curses from the player
+    RemoveCurse,
+    /// Give the player a named item (by string identifier)
+    GiveNamedItem(String),
 }
 
 /// Conditions for dialogue choices to be available
@@ -110,6 +163,22 @@ pub enum DialogueCondition {
     MinLevel(u32),
     /// Dungeon level must be at least this
     MinDungeonLevel(u32),
+    /// Player has a named quest (by string identifier)
+    HasQuest(String),
+    /// Player has a named item (by string identifier)
+    HasNamedItem(String),
+    /// Player level must be at least this value
+    LevelAtLeast(u32),
+    /// Player has specific faction reputation at threshold
+    FactionReputation(String, i32),
+    /// Player has at least one companion
+    HasCompanion,
+    /// Player completed a named quest (by string identifier)
+    CompletedQuest(String),
+    /// Condition based on time of day
+    TimeOfDay(String),
+    /// Player is a specific class
+    ClassIs(String),
 }
 
 /// Types of temporary buffs NPCs can grant
@@ -278,6 +347,11 @@ impl DialogueTree {
     /// End the dialogue
     pub fn end(&mut self) {
         self.current_node = None;
+    }
+
+    /// Get a node by its ID
+    pub fn get_node(&self, id: DialogueNodeId) -> Option<&DialogueNode> {
+        self.nodes.get(&id)
     }
 }
 
@@ -1858,6 +1932,229 @@ impl NPCManager {
     pub fn is_quest_active(&self, quest_id: QuestId) -> bool {
         self.active_quests.iter().any(|q| q.id == quest_id)
     }
+}
+
+// ============================================================================
+// Predefined NPC Dialogues
+// ============================================================================
+
+/// Returns a list of predefined NPCs with their dialogue trees.
+/// Each entry is a tuple of (NPC name, DialogueTree).
+pub fn predefined_npc_dialogues() -> Vec<(String, DialogueTree)> {
+    vec![
+        // 1. Elder Thane - Quest giver, provides main story quests
+        (
+            "Elder Thane".to_string(),
+            {
+                let root = DialogueNode::new(0, "Elder Thane", "Greetings, young one. I am Elder Thane, keeper of the ancient histories. The darkness grows ever stronger, and we need heroes now more than ever.")
+                    .add_choice(DialogueChoice::new("I seek a quest worthy of my skills.", Some(1)))
+                    .add_choice(DialogueChoice::new("Tell me about the ancient threat.", Some(2)))
+                    .add_choice(DialogueChoice::new("I must go. Farewell, Elder.", None));
+
+                let quest_node = DialogueNode::new(1, "Elder Thane", "The Demon King stirs in the depths below. His minions pour forth from the lower floors. Brave the dungeon, slay his lieutenants, and bring peace to our land.")
+                    .add_choice(
+                        DialogueChoice::new("I accept this burden.", None)
+                            .with_action(DialogueAction::GiveQuest("The Demon King's Fall".to_string()))
+                    )
+                    .add_choice(DialogueChoice::new("I need to prepare first.", None));
+
+                let lore_node = DialogueNode::new(2, "Elder Thane", "Long ago, this land was prosperous. Then the rift opened, and demonic forces spilled through. The Demon King seized power and corrupted everything. Only by defeating him can we restore balance.")
+                    .add_choice(DialogueChoice::new("How do I reach the Demon King?", Some(3)))
+                    .add_choice(DialogueChoice::new("I will end his reign.", Some(1)));
+
+                let path_node = DialogueNode::new(3, "Elder Thane", "You must descend through thirty floors of peril. Every fifth floor holds a powerful guardian. Prepare well, gather allies, and never lose hope.")
+                    .add_choice(DialogueChoice::new("Thank you for the guidance.", None));
+
+                DialogueTree::new(root)
+                    .add_node(quest_node)
+                    .add_node(lore_node)
+                    .add_node(path_node)
+            },
+        ),
+        // 2. Merchant Zara - Opens shop, buys/sells
+        (
+            "Merchant Zara".to_string(),
+            {
+                let root = DialogueNode::new(0, "Merchant Zara", "Welcome, welcome! Zara has the finest goods in all the dungeon. Weapons, potions, scrolls -- you name it, Zara has it!")
+                    .add_choice(DialogueChoice::new("Show me your wares.", Some(1)).with_action(DialogueAction::OpenShop))
+                    .add_choice(DialogueChoice::new("I want to sell some items.", Some(2)).with_action(DialogueAction::OpenShop))
+                    .add_choice(DialogueChoice::new("Where do you get your stock?", Some(3)))
+                    .add_choice(DialogueChoice::new("Not now, thanks.", None));
+
+                let shop_node = DialogueNode::new(1, "Merchant Zara", "Browse to your heart's content! Everything is priced fairly -- well, mostly fairly.")
+                    .add_choice(DialogueChoice::new("Thank you, Zara.", None));
+
+                let sell_node = DialogueNode::new(2, "Merchant Zara", "Ah, looking to offload some treasures? Zara pays a fair price for quality goods!")
+                    .add_choice(DialogueChoice::new("Let me see what you'll buy.", None).with_action(DialogueAction::OpenShop));
+
+                let story_node = DialogueNode::new(3, "Merchant Zara", "A merchant never reveals her sources! But between you and me, the monsters drop the most interesting things. One creature's trash is another's treasure!")
+                    .add_choice(DialogueChoice::new("Clever. Show me your goods.", Some(1)).with_action(DialogueAction::OpenShop))
+                    .add_choice(DialogueChoice::new("Ha! Farewell, Zara.", None));
+
+                DialogueTree::new(root)
+                    .add_node(shop_node)
+                    .add_node(sell_node)
+                    .add_node(story_node)
+            },
+        ),
+        // 3. Captain Voss - Arena master, offers combat challenges
+        (
+            "Captain Voss".to_string(),
+            {
+                let root = DialogueNode::new(0, "Captain Voss", "Stand tall, warrior! I am Captain Voss, master of the Arena of Blades. Do you have what it takes to face my challenges?")
+                    .add_choice(DialogueChoice::new("I accept your challenge!", Some(1)))
+                    .add_choice(DialogueChoice::new("What rewards do you offer?", Some(2)))
+                    .add_choice(DialogueChoice::new("Not today, Captain.", None));
+
+                let challenge_node = DialogueNode::new(1, "Captain Voss", "Excellent! Prepare yourself for combat. The arena shows no mercy, but the rewards are legendary for those who survive.")
+                    .add_choice(
+                        DialogueChoice::new("Begin the fight!", None)
+                            .with_action(DialogueAction::Fight)
+                    )
+                    .add_choice(DialogueChoice::new("Wait, let me prepare first.", None));
+
+                let rewards_node = DialogueNode::new(2, "Captain Voss", "Victory in the arena grants gold, rare equipment, and the respect of warriors everywhere. Defeat all my champions and I will teach you my signature technique.")
+                    .add_choice(DialogueChoice::new("I am ready to fight!", Some(1)))
+                    .add_choice(
+                        DialogueChoice::new("Teach me your technique. [Level 15+]", None)
+                            .with_action(DialogueAction::TeachSkill("Voss's Whirlwind Strike".to_string()))
+                            .with_condition(DialogueCondition::LevelAtLeast(15))
+                    )
+                    .add_choice(DialogueChoice::new("I will return stronger.", None));
+
+                DialogueTree::new(root)
+                    .add_node(challenge_node)
+                    .add_node(rewards_node)
+            },
+        ),
+        // 4. Healer Miriel - Heals and removes curses
+        (
+            "Healer Miriel".to_string(),
+            {
+                let root = DialogueNode::new(0, "Healer Miriel", "Peace be upon you, traveler. I am Miriel, servant of the healing light. Your wounds and afflictions are my concern.")
+                    .add_choice(DialogueChoice::new("I need healing.", Some(1)))
+                    .add_choice(DialogueChoice::new("Can you remove my curse?", Some(2)))
+                    .add_choice(DialogueChoice::new("I am well. Thank you.", None));
+
+                let heal_node = DialogueNode::new(1, "Healer Miriel", "Let the light flow through you and mend what is broken. For a donation of 100 gold, I can fully restore your health and spirit.")
+                    .add_choice(
+                        DialogueChoice::new("Heal me fully. [100 gold]", Some(3))
+                            .with_action(DialogueAction::FullRestore)
+                            .with_condition(DialogueCondition::HasGold(100))
+                    )
+                    .add_choice(DialogueChoice::new("A small blessing will do. [Free]", None).with_action(DialogueAction::Heal(30)))
+                    .add_choice(DialogueChoice::new("Perhaps later.", None));
+
+                let curse_node = DialogueNode::new(2, "Healer Miriel", "I sense dark energies clinging to your soul. For 200 gold, I can purge all curses and negative enchantments from your being.")
+                    .add_choice(
+                        DialogueChoice::new("Remove my curses. [200 gold]", Some(3))
+                            .with_action(DialogueAction::RemoveCurse)
+                            .with_condition(DialogueCondition::HasGold(200))
+                    )
+                    .add_choice(DialogueChoice::new("I will endure for now.", None));
+
+                let done_node = DialogueNode::new(3, "Healer Miriel", "It is done. The light has cleansed you. Go forth with renewed vigor, and may your path be blessed.")
+                    .add_choice(DialogueChoice::new("Thank you, Miriel.", None));
+
+                DialogueTree::new(root)
+                    .add_node(heal_node)
+                    .add_node(curse_node)
+                    .add_node(done_node)
+            },
+        ),
+        // 5. Scholar Fen - Reveals lore and teaches skills
+        (
+            "Scholar Fen".to_string(),
+            {
+                let root = DialogueNode::new(0, "Scholar Fen", "Ah, a fellow seeker of knowledge! I am Fen, collector of forgotten lore and lost techniques. What wisdom do you seek?")
+                    .add_choice(DialogueChoice::new("Tell me about this dungeon's history.", Some(1)))
+                    .add_choice(DialogueChoice::new("Can you teach me a new skill?", Some(2)))
+                    .add_choice(DialogueChoice::new("What secrets have you uncovered?", Some(3)))
+                    .add_choice(DialogueChoice::new("I seek my own path. Farewell.", None));
+
+                let lore_node = DialogueNode::new(1, "Scholar Fen", "This place was once the grand fortress of King Aldric. When the Demon King corrupted the leylines beneath, the fortress collapsed into the earth, creating these sprawling dungeon levels.")
+                    .add_choice(DialogueChoice::new("Fascinating. Tell me more.", None).with_action(DialogueAction::RevealLore("The Fall of Aldric's Fortress".to_string())))
+                    .add_choice(DialogueChoice::new("Useful knowledge. Thank you.", None));
+
+                let teach_node = DialogueNode::new(2, "Scholar Fen", "I have studied many ancient combat techniques preserved in dusty tomes. For 500 gold, I can impart one to you.")
+                    .add_choice(
+                        DialogueChoice::new("Teach me the Ancient Ward technique. [500 gold]", None)
+                            .with_action(DialogueAction::TeachSkill("Ancient Ward".to_string()))
+                            .with_condition(DialogueCondition::HasGold(500))
+                    )
+                    .add_choice(
+                        DialogueChoice::new("Teach me the Arcane Insight technique. [500 gold]", None)
+                            .with_action(DialogueAction::TeachSkill("Arcane Insight".to_string()))
+                            .with_condition(DialogueCondition::HasGold(500))
+                    )
+                    .add_choice(DialogueChoice::new("Too expensive for now.", None));
+
+                let secrets_node = DialogueNode::new(3, "Scholar Fen", "I have discovered that each boss guardian holds a fragment of an ancient key. Collect all six fragments, and a hidden passage to the Demon King's true throne will be revealed.")
+                    .add_choice(DialogueChoice::new("Where is the first fragment?", None).with_action(DialogueAction::RevealLore("The Six Fragments of Aldric's Key".to_string())))
+                    .add_choice(DialogueChoice::new("I will remember this. Thank you.", None));
+
+                DialogueTree::new(root)
+                    .add_node(lore_node)
+                    .add_node(teach_node)
+                    .add_node(secrets_node)
+            },
+        ),
+        // 6. Shadow Broker - Black market deals, faction quests
+        (
+            "Shadow Broker".to_string(),
+            {
+                let root = DialogueNode::new(0, "Shadow Broker", "...You found me. Impressive. I deal in things others dare not touch. Rare artifacts, forbidden knowledge, dangerous contracts. Interested?")
+                    .add_choice(DialogueChoice::new("Show me what you have.", Some(1)).with_action(DialogueAction::OpenShop))
+                    .add_choice(DialogueChoice::new("I need a contract -- a job.", Some(2)))
+                    .add_choice(DialogueChoice::new("This is too shady for me.", None));
+
+                let shop_node = DialogueNode::new(1, "Shadow Broker", "Cursed blades, stolen relics, potions of questionable origin... everything has a price. Just don't ask where it came from.")
+                    .add_choice(DialogueChoice::new("I'll take my chances.", None));
+
+                let contract_node = DialogueNode::new(2, "Shadow Broker", "I have a delicate matter. A rival faction holds an artifact I need. Retrieve it, and I will reward you handsomely -- and share intelligence about the deeper floors.")
+                    .add_choice(
+                        DialogueChoice::new("I'll do it.", None)
+                            .with_action(DialogueAction::GiveQuest("The Shadow Broker's Retrieval".to_string()))
+                    )
+                    .add_choice(DialogueChoice::new("Too risky.", None));
+
+                DialogueTree::new(root)
+                    .add_node(shop_node)
+                    .add_node(contract_node)
+            },
+        ),
+        // 7. The Oracle - Prophecies and hints
+        (
+            "The Oracle".to_string(),
+            {
+                let root = DialogueNode::new(0, "The Oracle", "I have been expecting you. The threads of fate converge upon this moment. Ask, and I shall reveal what the stars have shown me.")
+                    .add_choice(DialogueChoice::new("What lies ahead for me?", Some(1)))
+                    .add_choice(DialogueChoice::new("How do I defeat the Demon King?", Some(2)))
+                    .add_choice(DialogueChoice::new("Can you see my past?", Some(3)))
+                    .add_choice(DialogueChoice::new("I forge my own destiny.", None));
+
+                let future_node = DialogueNode::new(1, "The Oracle", "I see fire and shadow in your future... a great battle upon a bridge of bones. You will face a choice -- mercy or vengeance. Choose wisely, for it will determine the fate of this world.")
+                    .add_choice(DialogueChoice::new("Can you be more specific?", Some(4)))
+                    .add_choice(DialogueChoice::new("I will remember your words.", None).with_action(DialogueAction::RevealLore("The Oracle's Prophecy of the Bone Bridge".to_string())));
+
+                let demon_node = DialogueNode::new(2, "The Oracle", "The Demon King is not what he seems. He was once mortal, a king who sought immortality through forbidden pacts. His weakness lies in the very humanity he abandoned. Seek the Crown of Memories on floor 25.")
+                    .add_choice(DialogueChoice::new("The Crown of Memories... I will find it.", None).with_action(DialogueAction::RevealLore("The Demon King's Mortal Past".to_string())))
+                    .add_choice(DialogueChoice::new("Is there no other way?", Some(4)));
+
+                let past_node = DialogueNode::new(3, "The Oracle", "You carry the weight of many battles, yet your spirit remains unbroken. This resilience is your greatest weapon. The dungeon tests not just strength, but will.")
+                    .add_choice(DialogueChoice::new("Thank you, Oracle.", None));
+
+                let cryptic_node = DialogueNode::new(4, "The Oracle", "The future is not fixed. Every choice you make shifts the threads of fate. Trust your instincts, gather allies, and remember: the light is strongest in the deepest darkness.")
+                    .add_choice(DialogueChoice::new("I understand. Farewell.", None));
+
+                DialogueTree::new(root)
+                    .add_node(future_node)
+                    .add_node(demon_node)
+                    .add_node(past_node)
+                    .add_node(cryptic_node)
+            },
+        ),
+    ]
 }
 
 // ============================================================================

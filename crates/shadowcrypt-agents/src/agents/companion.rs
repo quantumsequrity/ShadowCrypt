@@ -90,7 +90,7 @@ impl CompanionBehaviors {
     /// Gets random companion dialogue
     pub fn random_dialogue<R: Rng>(kind: AgentKind, rng: &mut R) -> String {
         let dialogues = Self::dialogues_for_kind(kind);
-        dialogues[rng.gen_range(0..dialogues.len())].to_string()
+        dialogues[rng.r#gen_range(0..dialogues.len())].to_string()
     }
 
     /// Gets all dialogues for a companion kind

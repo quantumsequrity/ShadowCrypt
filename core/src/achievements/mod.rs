@@ -84,7 +84,7 @@ pub enum AchievementReward {
 }
 
 /// Types of stats that can be modified by achievement rewards
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum StatType {
     MaxHp,
     MaxMana,
@@ -101,6 +101,37 @@ impl StatType {
             Self::Attack => "Attack",
             Self::Defense => "Defense",
             Self::Speed => "Speed",
+        }
+    }
+}
+
+/// Extended reward types for achievements (Phase 9)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum AchievementRewardType {
+    /// Bonus to starting stats
+    StartingBonus(i32),
+    /// Unlock a new playable species
+    UnlockSpecies(String),
+    /// Unlock a new playable class
+    UnlockClass(String),
+    /// Unlock a cosmetic color (R, G, B)
+    CosmeticColor(u8, u8, u8),
+    /// Unlock a title for the player
+    TitleUnlock(String),
+    /// Grant a permanent XP multiplier bonus
+    BonusXP(f32),
+}
+
+impl AchievementRewardType {
+    /// Returns a display string for this reward type
+    pub fn description(&self) -> String {
+        match self {
+            Self::StartingBonus(amount) => format!("+{} to starting stats", amount),
+            Self::UnlockSpecies(name) => format!("Unlocks {} as a playable species", name),
+            Self::UnlockClass(name) => format!("Unlocks {} as a playable class", name),
+            Self::CosmeticColor(r, g, b) => format!("Unlocks cosmetic color ({}, {}, {})", r, g, b),
+            Self::TitleUnlock(title) => format!("Unlocks title: {}", title),
+            Self::BonusXP(pct) => format!("+{:.0}% bonus XP", pct * 100.0),
         }
     }
 }
@@ -213,6 +244,10 @@ pub enum AchievementId {
     TrueHero,          // Beat game 10 times with any class
     LegendaryHero,     // Beat game 50 times with any class
 
+    ClericMaster,      // Beat game as Cleric
+    MonkMaster,        // Beat game as Monk
+    MasterOfAll,       // Beat game with all 8 classes to unlock "Legendary Hero" title
+
     // Challenge achievements (171-200)
     Speedrunner,       // Beat game in under 1000 turns
     SpeedDemon,        // Beat game in under 500 turns
@@ -280,7 +315,8 @@ impl AchievementId {
             Self::BossSlayer,
             // Class Mastery
             Self::WarriorMaster, Self::MageMaster, Self::RogueMaster, Self::PaladinMaster,
-            Self::RangerMaster, Self::NecromancerMaster, Self::JackOfAllTrades,
+            Self::RangerMaster, Self::NecromancerMaster, Self::ClericMaster, Self::MonkMaster,
+            Self::MasterOfAll, Self::JackOfAllTrades,
             Self::TrueHero, Self::LegendaryHero,
             // Challenge
             Self::Speedrunner, Self::SpeedDemon, Self::LightningFast, Self::Immortal,
@@ -841,9 +877,32 @@ impl Achievement {
                 1, 50, None, false
             ),
             Achievement::new(
+                AchievementId::ClericMaster,
+                "Cleric Master",
+                "Complete the game as a Cleric",
+                AchievementCategory::ClassMastery,
+                1, 50, None, false
+            ),
+            Achievement::new(
+                AchievementId::MonkMaster,
+                "Monk Master",
+                "Complete the game as a Monk",
+                AchievementCategory::ClassMastery,
+                1, 50, None, false
+            ),
+            Achievement::new(
+                AchievementId::MasterOfAll,
+                "Master of All",
+                "Complete the game with all 8 classes",
+                AchievementCategory::ClassMastery,
+                8, 500,
+                Some(AchievementReward::Title("Legendary Hero".to_string())),
+                false
+            ),
+            Achievement::new(
                 AchievementId::JackOfAllTrades,
                 "Jack of All Trades",
-                "Complete the game with all 6 classes",
+                "Complete the game with all 6 base classes",
                 AchievementCategory::ClassMastery,
                 6, 200,
                 Some(AchievementReward::Perk("Bonus starting stats for all classes".to_string())),
@@ -1343,7 +1402,10 @@ impl AchievementTracker {
 
         // Track dragon kills
         if matches!(enemy_kind,
-            EnemyKind::FireDrake | EnemyKind::BossIceDragon | EnemyKind::AncientWyrm
+            EnemyKind::FireDrake | EnemyKind::BossIceDragon | EnemyKind::AncientWyrm |
+            EnemyKind::Whelpling | EnemyKind::YoungDragon | EnemyKind::AdultDragon |
+            EnemyKind::AncientDragon | EnemyKind::DragonLord | EnemyKind::DragonGod |
+            EnemyKind::Wyvern
         ) {
             self.stats.dragon_kills += 1;
             self.update_progress(AchievementId::DragonSlayer, self.stats.dragon_kills, turn);
@@ -1696,11 +1758,18 @@ impl AchievementTracker {
             CharacterClass::Paladin => self.unlock(AchievementId::PaladinMaster, turn),
             CharacterClass::Ranger => self.unlock(AchievementId::RangerMaster, turn),
             CharacterClass::Necromancer => self.unlock(AchievementId::NecromancerMaster, turn),
+            CharacterClass::Cleric => self.unlock(AchievementId::ClericMaster, turn),
+            CharacterClass::Monk => self.unlock(AchievementId::MonkMaster, turn),
         };
 
-        // Jack of all trades
+        // Jack of all trades (6 base classes)
         if self.stats.games_won_by_class.len() >= 6 {
             self.unlock(AchievementId::JackOfAllTrades, turn);
+        }
+
+        // Master of All (all 8 classes)
+        if self.stats.games_won_by_class.len() >= 8 {
+            self.unlock(AchievementId::MasterOfAll, turn);
         }
 
         // Victory count achievements

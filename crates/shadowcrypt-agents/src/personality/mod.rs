@@ -37,7 +37,7 @@ impl Personality {
             traits: PersonalityTraits::random(&mut rng),
             emotion: Emotion::Neutral,
             mood: Mood::Neutral,
-            stability: rng.gen_range(0.3..0.9),
+            stability: rng.r#gen_range(0.3..0.9),
             values: Vec::new(),
             quirks: Vec::new(),
             fears: Vec::new(),
@@ -242,11 +242,11 @@ impl PersonalityTraits {
     /// Creates random traits
     pub fn random<R: Rng>(rng: &mut R) -> Self {
         Self {
-            openness: rng.gen(),
-            conscientiousness: rng.gen(),
-            extraversion: rng.gen(),
-            agreeableness: rng.gen(),
-            neuroticism: rng.gen(),
+            openness: rng.r#gen(),
+            conscientiousness: rng.r#gen(),
+            extraversion: rng.r#gen(),
+            agreeableness: rng.r#gen(),
+            neuroticism: rng.r#gen(),
         }
     }
 

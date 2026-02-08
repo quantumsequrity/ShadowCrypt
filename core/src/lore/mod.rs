@@ -1693,7 +1693,9 @@ pub fn get_world_history_entry(id: &LoreEntryId) -> Option<LoreEntry> {
         )),
 
         // Monster entries are generated dynamically
+        LoreEntryId::MonsterEntry(_) => None,
         // Item entries are generated dynamically
+        LoreEntryId::ItemEntry(_) => None,
     };
     None
 }

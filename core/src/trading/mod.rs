@@ -829,20 +829,27 @@ impl TradeRouteSystem {
         let mut results = Vec::new();
         let mut completed = Vec::new();
 
-        for (idx, caravan) in self.active_caravans.iter_mut().enumerate() {
+        // Collect completed caravan info first (immutable pass)
+        let caravan_info: Vec<(usize, u64, Vec<TradeGood>, TradeRegion, TradeGoodCategory)> = self.active_caravans.iter().enumerate()
+            .filter(|(_, c)| c.progress + 1 >= c.travel_time)
+            .map(|(idx, c)| (idx, c.id, c.goods.clone(), c.destination, c.goods_category))
+            .collect();
+
+        // Increment progress (mutable pass)
+        for caravan in self.active_caravans.iter_mut() {
             caravan.progress += 1;
-            if caravan.progress >= caravan.travel_time {
-                results.push(CaravanResult {
-                    caravan_id: caravan.id,
-                    goods_delivered: caravan.goods.clone(),
-                    destination: caravan.destination,
-                    profit_modifier: self.get_price_modifier_for_region(
-                        caravan.destination,
-                        caravan.goods_category,
-                    ),
-                });
-                completed.push(idx);
-            }
+        }
+
+        // Build results using collected info
+        for (idx, id, goods, destination, category) in caravan_info {
+            let profit_modifier = self.get_price_modifier_for_region(destination, category);
+            results.push(CaravanResult {
+                caravan_id: id,
+                goods_delivered: goods,
+                destination,
+                profit_modifier,
+            });
+            completed.push(idx);
         }
 
         // Remove completed caravans in reverse order
@@ -1562,24 +1569,28 @@ impl AuctionHouse {
     }
 
     pub fn place_bid(&mut self, listing_id: u64, bid: AuctionBid) -> Result<(), AuctionError> {
-        let listing = self.get_listing_mut(listing_id).ok_or(AuctionError::NotFound)?;
-
-        // Check VIP access
-        if listing.auction_type == AuctionType::VIP && !self.vip_members.contains(&bid.bidder_id) {
-            return Err(AuctionError::NotAuthorized);
+        // Check VIP access before mutable borrow
+        {
+            let listing = self.get_listing(listing_id).ok_or(AuctionError::NotFound)?;
+            if listing.auction_type == AuctionType::VIP && !self.vip_members.contains(&bid.bidder_id) {
+                return Err(AuctionError::NotAuthorized);
+            }
         }
 
+        let listing = self.get_listing_mut(listing_id).ok_or(AuctionError::NotFound)?;
         listing.place_bid(bid)
     }
 
     pub fn buyout(&mut self, listing_id: u64, buyer_id: u64, buyer_name: &str) -> Result<u64, AuctionError> {
-        let listing = self.get_listing_mut(listing_id).ok_or(AuctionError::NotFound)?;
-
-        // Check VIP access
-        if listing.auction_type == AuctionType::VIP && !self.vip_members.contains(&buyer_id) {
-            return Err(AuctionError::NotAuthorized);
+        // Check VIP access before mutable borrow
+        {
+            let listing = self.get_listing(listing_id).ok_or(AuctionError::NotFound)?;
+            if listing.auction_type == AuctionType::VIP && !self.vip_members.contains(&buyer_id) {
+                return Err(AuctionError::NotAuthorized);
+            }
         }
 
+        let listing = self.get_listing_mut(listing_id).ok_or(AuctionError::NotFound)?;
         listing.buyout(buyer_id, buyer_name)?;
         Ok(listing.current_price)
     }

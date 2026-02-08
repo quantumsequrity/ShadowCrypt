@@ -715,11 +715,12 @@ impl GambleOutcome {
 
     /// Returns whether this is a positive outcome
     pub fn is_positive(&self) -> bool {
-        matches!(self,
+        match self {
             Self::WonGold(_) | Self::WonItem(_) | Self::GainedHP(_) |
-            Self::GainedBuff(_, _) | Self::Jackpot(_, _) | Self::Unlocked(_) |
-            Self::StatChange(_, delta) if *delta > 0
-        )
+            Self::GainedBuff(_, _) | Self::Jackpot(_, _) | Self::Unlocked(_) => true,
+            Self::StatChange(_, delta) => *delta > 0,
+            _ => false,
+        }
     }
 }
 

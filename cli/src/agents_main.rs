@@ -15,8 +15,21 @@ use std::io::{stdout, Write};
 use std::time::{Duration, Instant};
 
 use shadowcrypt_core::prelude::*;
-use shadowcrypt_core::ui::Color;
 use shadowcrypt_agents::prelude::*;
+
+/// Simple RGB color struct for agent visualization
+#[derive(Clone, Copy, Debug)]
+struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Color {
+    pub const CYAN: Color = Color { r: 0, g: 255, b: 255 };
+    pub const YELLOW: Color = Color { r: 255, g: 255, b: 0 };
+    pub const WHITE: Color = Color { r: 255, g: 255, b: 255 };
+}
 
 const VIEW_WIDTH: usize = 80;
 const VIEW_HEIGHT: usize = 35;
@@ -114,8 +127,8 @@ impl MultiAgentGame {
         self.agents.process_turn();
 
         // Process communications
-        let messages = self.agents.message_bus.messages.clone();
-        for msg in messages.iter().take(5) {
+        let messages = self.agents.message_bus.recent_messages(5);
+        for msg in messages.iter() {
             let from_name = self.agents.get(msg.from)
                 .map(|a| a.name.clone())
                 .unwrap_or_else(|| "Unknown".to_string());

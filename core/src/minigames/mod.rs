@@ -1316,7 +1316,8 @@ impl Tournament {
             skill_level: 0, // Player skill is determined by actual performance
         });
 
-        let prize_pool = entry_fee * participants.len() as u32;
+        let num_participants = participants.len();
+        let prize_pool = entry_fee * num_participants as u32;
 
         Self {
             id,
@@ -1326,7 +1327,7 @@ impl Tournament {
             current_round: 0,
             total_rounds: TOURNAMENT_ROUNDS,
             participants,
-            player_position: participants.len() as u32,
+            player_position: num_participants as u32,
             player_score: 0,
             entry_fee,
             prize_pool,
@@ -1865,7 +1866,8 @@ impl MinigameStats {
         }
 
         // Type-specific achievements
-        if let Some(type_stats) = self.type_stats.get(&result.minigame_type) {
+        // Clone the type_stats to avoid borrowing self immutably while calling unlock_achievement
+        if let Some(type_stats) = self.type_stats.get(&result.minigame_type).cloned() {
             match result.minigame_type {
                 MinigameType::Lockpicking => {
                     if type_stats.total_completed >= 50 {

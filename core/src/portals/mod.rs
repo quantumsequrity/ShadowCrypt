@@ -147,9 +147,10 @@ pub enum PortalDestination {
 }
 
 /// Alternate dimensions
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Dimension {
     /// Normal world
+    #[default]
     Material,
     /// Shadow realm
     Shadow,

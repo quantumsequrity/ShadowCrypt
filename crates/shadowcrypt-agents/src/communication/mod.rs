@@ -274,6 +274,11 @@ impl MessageBus {
         self.events.iter().take(count).collect()
     }
 
+    /// Gets recent messages from the global message log
+    pub fn recent_messages(&self, count: usize) -> Vec<&Message> {
+        self.messages.iter().rev().take(count).collect()
+    }
+
     /// Advances the turn counter
     pub fn tick(&mut self) {
         self.turn += 1;

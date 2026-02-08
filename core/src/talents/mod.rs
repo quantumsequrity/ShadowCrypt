@@ -195,6 +195,18 @@ impl TalentId {
                 Self::NecromancerDeathCoil, Self::NecromancerArmyOfDead, Self::NecromancerPlagueSpreader,
                 Self::NecromancerSoulReaper, Self::NecromancerLichForm, Self::NecromancerDeathLord,
             ],
+            CharacterClass::Cleric => vec![
+                Self::PaladinDivineStrength, Self::PaladinHolyResilience, Self::PaladinBlessedAura,
+                Self::PaladinHolySmiteEnhanced, Self::PaladinShieldOfFaith, Self::PaladinHealingHands,
+                Self::PaladinRetribution, Self::PaladinPurify, Self::PaladinConsecrationEnhanced,
+                Self::PaladinDivineIntervention, Self::PaladinHolyAvenger, Self::PaladinChampion,
+            ],
+            CharacterClass::Monk => vec![
+                Self::WarriorWeaponMastery, Self::WarriorIronSkin, Self::WarriorBattleCry,
+                Self::WarriorCleaveEnhanced, Self::WarriorArmorPenetration, Self::WarriorSecondWind,
+                Self::WarriorBerserkerRage, Self::WarriorUnstoppable, Self::WarriorVeteranReflexes,
+                Self::WarriorDeathBlow, Self::WarriorTitanStrength, Self::WarriorWarlord,
+            ],
         }
     }
 

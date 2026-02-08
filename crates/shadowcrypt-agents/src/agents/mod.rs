@@ -351,7 +351,7 @@ impl AgentKind {
             Self::SkeletonMinion => '☠',
             Self::FireElemental => '🔥',
             Self::IceElemental => '❄',
-            Self::EarthElemental => '�ite',
+            Self::EarthElemental => 'E',
             Self::SpiritGuide => '👻',
             Self::Mercenary => '⚔',
             Self::Squire => '🛡',

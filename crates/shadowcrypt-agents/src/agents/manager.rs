@@ -102,8 +102,8 @@ impl AgentManager {
 
         for i in 0..count {
             let kind = kinds[i % kinds.len()];
-            let x = self.rng.gen_range(min_x..max_x);
-            let y = self.rng.gen_range(min_y..max_y);
+            let x = self.rng.r#gen_range(min_x..max_x);
+            let y = self.rng.r#gen_range(min_y..max_y);
             let name = format!("{} #{}", kind.name(), i + 1);
             self.spawn(kind, name, x, y);
         }
@@ -162,8 +162,8 @@ impl AgentManager {
         ];
 
         for (i, kind) in enemy_kinds.iter().enumerate() {
-            let x = width / 2 + self.rng.gen_range(0..width / 3);
-            let y = height / 2 + self.rng.gen_range(0..height / 3);
+            let x = width / 2 + self.rng.r#gen_range(0..width / 3);
+            let y = height / 2 + self.rng.r#gen_range(0..height / 3);
             let name = format!("{}", kind.name());
             self.spawn(*kind, name, x, y);
         }
@@ -178,8 +178,8 @@ impl AgentManager {
         ];
 
         for kind in companion_kinds {
-            let x = self.rng.gen_range(10..width - 10);
-            let y = self.rng.gen_range(10..height - 10);
+            let x = self.rng.r#gen_range(10..width - 10);
+            let y = self.rng.r#gen_range(10..height - 10);
             let name = format!("{}", kind.name());
             self.spawn(kind, name, x, y);
         }
@@ -349,6 +349,7 @@ impl AgentManager {
             (agent.x, agent.y)
         };
 
+        let action_clone = action.clone();
         match action {
             AgentAction::Move { dx, dy } => {
                 if let Some(agent) = self.agents.get_mut(&id) {
@@ -432,7 +433,7 @@ impl AgentManager {
 
         // Record last action
         if let Some(agent) = self.agents.get_mut(&id) {
-            agent.last_action = Some(action);
+            agent.last_action = Some(action_clone);
             agent.turn = self.turn;
         }
     }
@@ -460,8 +461,8 @@ impl AgentManager {
     }
 
     /// Gets statistics about agents
-    pub fn stats(&self) -> AgentStats {
-        let mut stats = AgentStats::default();
+    pub fn stats(&self) -> AgentManagerStats {
+        let mut stats = AgentManagerStats::default();
         stats.total = self.agents.len();
         stats.alive = self.agents.values().filter(|a| a.is_alive()).count();
         stats.dead = stats.total - stats.alive;
@@ -488,7 +489,7 @@ impl Default for AgentManager {
 
 /// Statistics about agents
 #[derive(Clone, Debug, Default)]
-pub struct AgentStats {
+pub struct AgentManagerStats {
     pub total: usize,
     pub alive: usize,
     pub dead: usize,

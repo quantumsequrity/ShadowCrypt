@@ -1617,6 +1617,7 @@ fn status_color(effect: &StatusEffect) -> Color {
         StatusEffect::Weakness => Color::DarkMagenta,
         StatusEffect::Invisibility => Color::Grey,
         StatusEffect::Confusion => Color::DarkYellow,
+        _ => Color::White,
     }
 }
 
@@ -1636,6 +1637,7 @@ fn status_icon(effect: &StatusEffect) -> &'static str {
         StatusEffect::Weakness => "[v]",     // Power down arrow
         StatusEffect::Invisibility => "[?]", // Fading/ghost
         StatusEffect::Confusion => "[&]",    // Spiral/swirl
+        _ => "[.]",
     }
 }
 
@@ -1690,6 +1692,7 @@ fn status_abbrev(effect: &StatusEffect) -> &'static str {
         StatusEffect::Weakness => "WEK",
         StatusEffect::Invisibility => "INV",
         StatusEffect::Confusion => "CNF",
+        _ => "???",
     }
 }
 
@@ -1794,10 +1797,8 @@ fn tile_glyph(tile: &Tile) -> char {
     match tile {
         Tile::Wall => symbols::WALL,
         Tile::Floor => symbols::FLOOR,
-        Tile::Corridor => symbols::CORRIDOR,
         Tile::Door => symbols::DOOR_CLOSED,
         Tile::OpenDoor => symbols::DOOR_OPEN,
-        Tile::LockedDoor => symbols::DOOR_LOCKED,
         Tile::StairsDown => symbols::STAIRS_DOWN,
         Tile::StairsUp => symbols::STAIRS_UP,
         Tile::Chest => symbols::CHEST,
@@ -1811,6 +1812,9 @@ fn tile_glyph(tile: &Tile) -> char {
         Tile::Sand => '.',
         Tile::Grass => '"',
         Tile::Ice => '=',
+        Tile::Pillar => 'O',
+        Tile::BossGate => '#',
+        _ => symbols::FLOOR,
     }
 }
 
@@ -1818,9 +1822,8 @@ fn tile_glyph(tile: &Tile) -> char {
 fn tile_color(tile: &Tile) -> Color {
     match tile {
         Tile::Wall => theme::WALL_VISIBLE,
-        Tile::Floor | Tile::Corridor => theme::FLOOR_VISIBLE,
+        Tile::Floor => theme::FLOOR_VISIBLE,
         Tile::Door | Tile::OpenDoor => theme::DOOR,
-        Tile::LockedDoor => Color::Rgb { r: 200, g: 50, b: 50 },
         Tile::StairsDown | Tile::StairsUp => theme::STAIRS,
         Tile::Chest => Color::Rgb { r: 255, g: 215, b: 0 },
         Tile::OpenChest => Color::Rgb { r: 139, g: 119, b: 42 },
@@ -1833,6 +1836,7 @@ fn tile_color(tile: &Tile) -> Color {
         Tile::Sand => Color::Rgb { r: 210, g: 180, b: 100 },
         Tile::Grass => Color::Rgb { r: 50, g: 180, b: 50 },
         Tile::Ice => Color::Rgb { r: 150, g: 220, b: 255 },
+        _ => theme::FLOOR_VISIBLE,
     }
 }
 
@@ -1840,7 +1844,7 @@ fn tile_color(tile: &Tile) -> Color {
 fn tile_color_dim(tile: &Tile) -> Color {
     match tile {
         Tile::Wall => theme::WALL,
-        Tile::Floor | Tile::Corridor => theme::FLOOR,
+        Tile::Floor => theme::FLOOR,
         Tile::StairsDown | Tile::StairsUp => Color::Rgb { r: 0, g: 100, b: 100 },
         _ => Color::Rgb { r: 50, g: 50, b: 60 },
     }
@@ -1920,10 +1924,18 @@ fn enemy_glyph(kind: &EnemyKind) -> char {
         // Bosses
         EnemyKind::BossGoblinKing => 'G',
         EnemyKind::BossOrcWarlord => 'O',
-        EnemyKind::BossLichKing => 'L',
+        EnemyKind::BossVampireLord => 'L',
         EnemyKind::BossForestGuardian => 'F',
-        EnemyKind::BossFrostWyrm => 'W',
+        EnemyKind::BossIceDragon => 'W',
         EnemyKind::BossDemonKing => 'D',
+
+        // Mini-Bosses
+        EnemyKind::GoblinChampion => 'G',
+        EnemyKind::OrcBerserker => 'O',
+        EnemyKind::VampireElite => 'V',
+        EnemyKind::AncientWyrm => 'W',
+        EnemyKind::FrostLord => 'F',
+        EnemyKind::InfernalLord => 'I',
     }
 }
 
@@ -2011,10 +2023,18 @@ fn enemy_color(kind: &EnemyKind) -> Color {
         // Bosses
         EnemyKind::BossGoblinKing => Color::Green,
         EnemyKind::BossOrcWarlord => Color::Green,
-        EnemyKind::BossLichKing => Color::Magenta,
+        EnemyKind::BossVampireLord => Color::Magenta,
         EnemyKind::BossForestGuardian => Color::Green,
-        EnemyKind::BossFrostWyrm => Color::Cyan,
+        EnemyKind::BossIceDragon => Color::Cyan,
         EnemyKind::BossDemonKing => Color::Red,
+
+        // Mini-Bosses
+        EnemyKind::GoblinChampion => Color::Green,
+        EnemyKind::OrcBerserker => Color::Green,
+        EnemyKind::VampireElite => Color::DarkRed,
+        EnemyKind::AncientWyrm => Color::Yellow,
+        EnemyKind::FrostLord => Color::Cyan,
+        EnemyKind::InfernalLord => Color::Red,
     }
 }
 
@@ -2023,14 +2043,14 @@ fn item_glyph(kind: &ItemKind) -> char {
     match kind {
         // Potions
         ItemKind::HealthPotion | ItemKind::ManaPotion | ItemKind::StrengthPotion
-        | ItemKind::SpeedPotion | ItemKind::InvisibilityPotion | ItemKind::GreaterHealthPotion
-        | ItemKind::GreaterManaPotion | ItemKind::ElixirOfLife | ItemKind::AntidotePotion
-        | ItemKind::FireResistPotion | ItemKind::ColdResistPotion => '!',
+        | ItemKind::SpeedPotion | ItemKind::InvisibilityPotion | ItemKind::FullRestorePotion
+        | ItemKind::UltimatePowerPotion | ItemKind::PoisonResistPotion
+        | ItemKind::FireResistPotion | ItemKind::IceResistPotion => '!',
 
         // Scrolls
-        ItemKind::ScrollOfFire | ItemKind::ScrollOfIce | ItemKind::ScrollOfLightning
-        | ItemKind::ScrollOfTeleport | ItemKind::ScrollOfIdentify | ItemKind::ScrollOfEnchant
-        | ItemKind::ScrollOfMapping | ItemKind::ScrollOfSummoning => '?',
+        ItemKind::ScrollFireball | ItemKind::ScrollIceStorm | ItemKind::ScrollLightning
+        | ItemKind::ScrollTeleport | ItemKind::ScrollIdentify | ItemKind::ScrollEnchant
+        | ItemKind::ScrollMapping | ItemKind::ScrollSummon => '?',
 
         // Weapons
         ItemKind::Dagger | ItemKind::ShortSword | ItemKind::LongSword | ItemKind::Greatsword
@@ -2092,6 +2112,8 @@ fn item_glyph(kind: &ItemKind) -> char {
         ItemKind::AncientRelic => '&',
         ItemKind::DragonScale => '~',
         ItemKind::DemonHeart => 'H',
+        // Catch-all for remaining item types
+        _ => '*',
     }
 }
 
@@ -2103,6 +2125,56 @@ fn rarity_color(rarity: &Rarity) -> Color {
         Rarity::Rare => theme::ITEM_RARE,
         Rarity::Epic => theme::ITEM_EPIC,
         Rarity::Legendary => theme::ITEM_LEGENDARY,
+        Rarity::Mythic => Color::Rgb { r: 255, g: 50, b: 50 },
+    }
+}
+
+/// Get display name for a rarity
+fn rarity_name(rarity: &Rarity) -> &'static str {
+    match rarity {
+        Rarity::Common => "Common",
+        Rarity::Uncommon => "Uncommon",
+        Rarity::Rare => "Rare",
+        Rarity::Epic => "Epic",
+        Rarity::Legendary => "Legendary",
+        Rarity::Mythic => "Mythic",
+    }
+}
+
+/// Helper to get attack bonus from an ItemKind
+fn item_attack_bonus(kind: &ItemKind) -> i32 {
+    kind.base_stats().0
+}
+
+/// Helper to get defense bonus from an ItemKind
+fn item_defense_bonus(kind: &ItemKind) -> i32 {
+    kind.base_stats().1
+}
+
+/// Helper to get HP bonus from an ItemKind
+fn item_hp_bonus(kind: &ItemKind) -> i32 {
+    kind.base_stats().2
+}
+
+/// Helper to get mana bonus from an ItemKind
+fn item_mana_bonus(kind: &ItemKind) -> i32 {
+    kind.base_stats().3
+}
+
+/// Helper to get heal amount from a consumable ItemKind
+fn item_heal_amount(kind: &ItemKind) -> i32 {
+    match kind {
+        ItemKind::HealthPotion => 30,
+        ItemKind::FullRestorePotion => 100,
+        _ => 0,
+    }
+}
+
+/// Helper to get mana restore amount from a consumable ItemKind
+fn item_mana_restore(kind: &ItemKind) -> i32 {
+    match kind {
+        ItemKind::ManaPotion => 30,
+        _ => 0,
     }
 }
 
@@ -2566,7 +2638,7 @@ fn render_full(state: &GameState, movement: Option<&MovementState>, targeting: O
 
     // Enhanced status effects display
     write!(stdout, "Effects: ")?;
-    render_status_effects_bar(&mut stdout, &state.player.status_effects, state.turn_count)?;
+    render_status_effects_bar(&mut stdout, &state.player.status_effects, state.turn_count as u64)?;
 
     // Messages (lines 45-50)
     for (i, msg) in state.messages.iter().enumerate() {
@@ -2861,7 +2933,7 @@ fn item_type_category(kind: &ItemKind) -> u8 {
             EquipSlot::Helmet => 3,
             EquipSlot::Gloves => 4,
             EquipSlot::Boots => 5,
-            EquipSlot::Ring => 6,
+            EquipSlot::Ring1 | EquipSlot::Ring2 => 6,
             EquipSlot::Amulet => 7,
         }
     } else if kind.is_consumable() {
@@ -2907,7 +2979,7 @@ fn item_type_indicator(kind: &ItemKind) -> &'static str {
             EquipSlot::Helmet => "[HLM]",
             EquipSlot::Gloves => "[GLV]",
             EquipSlot::Boots => "[BTS]",
-            EquipSlot::Ring => "[RNG]",
+            EquipSlot::Ring1 | EquipSlot::Ring2 => "[RNG]",
             EquipSlot::Amulet => "[AMU]",
         }
     } else if kind.is_food() {
@@ -2944,7 +3016,10 @@ pub fn handle_inventory_input(code: KeyCode, state: &mut GameState) -> bool {
                     let sorted = get_sorted_indices(&state.player.inventory, ui.sort_mode);
                     if ui.selected_index < sorted.len() {
                         let real_idx = sorted[ui.selected_index];
-                        state.drop_item(real_idx);
+                        if real_idx < state.player.inventory.len() {
+                            let dropped = state.player.inventory.remove(real_idx);
+                            state.add_message(format!("Dropped {}.", dropped.kind.name()), 3);
+                        }
                         if ui.selected_index >= state.player.inventory.len() && ui.selected_index > 0 {
                             ui.selected_index -= 1;
                         }
@@ -3016,7 +3091,7 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
             (EquipSlot::Helmet, "HLM", "DEF"),
             (EquipSlot::Gloves, "GLV", "ATK"),
             (EquipSlot::Boots,  "BTS", "SPD"),
-            (EquipSlot::Ring,   "RNG", ""),
+            (EquipSlot::Ring1,  "RNG", ""),
             (EquipSlot::Amulet, "AMU", ""),
         ];
 
@@ -3031,8 +3106,8 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
                 write!(stdout, "{:<22}", trunc)?;
                 if !stat_type.is_empty() {
                     let stat_val = match *stat_type {
-                        "ATK" => item.kind.attack_bonus(),
-                        "DEF" => item.kind.defense_bonus(),
+                        "ATK" => item_attack_bonus(&item.kind),
+                        "DEF" => item_defense_bonus(&item.kind),
                         _ => 0,
                     };
                     if stat_val > 0 {
@@ -3140,7 +3215,7 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
             execute!(stdout, MoveTo(detail_x + 2, start_y + 4), SetForegroundColor(Color::Grey))?;
             write!(stdout, "Rarity: ")?;
             execute!(stdout, SetForegroundColor(rarity_color(&item.rarity)))?;
-            write!(stdout, "{}", item.rarity.name())?;
+            write!(stdout, "{}", rarity_name(&item.rarity))?;
 
             execute!(stdout, MoveTo(detail_x + 2, start_y + 5), SetForegroundColor(Color::Grey))?;
             write!(stdout, "Type: ")?;
@@ -3151,10 +3226,10 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
             write!(stdout, "-- Stats --")?;
 
             let mut stat_line = start_y + 8;
-            let atk = item.kind.attack_bonus();
-            let def = item.kind.defense_bonus();
-            let hp = item.kind.hp_bonus();
-            let mp = item.kind.mana_bonus();
+            let atk = item_attack_bonus(&item.kind);
+            let def = item_defense_bonus(&item.kind);
+            let hp = item_hp_bonus(&item.kind);
+            let mp = item_mana_bonus(&item.kind);
 
             if atk > 0 {
                 execute!(stdout, MoveTo(detail_x + 2, stat_line), SetForegroundColor(Color::Yellow))?;
@@ -3178,8 +3253,8 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
             }
 
             if item.kind.is_consumable() {
-                let heal = item.kind.heal_amount();
-                let mana = item.kind.mana_restore();
+                let heal = item_heal_amount(&item.kind);
+                let mana = item_mana_restore(&item.kind);
                 let food = item.kind.food_value();
 
                 if heal > 0 {
@@ -3211,8 +3286,8 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
                     let eq_trunc = if eq_name.len() > 15 { format!("{}...", &eq_name[..12]) } else { eq_name.to_string() };
                     write!(stdout, "{}", eq_trunc)?;
 
-                    let curr_atk = equipped.kind.attack_bonus();
-                    let new_atk = item.kind.attack_bonus();
+                    let curr_atk = item_attack_bonus(&equipped.kind);
+                    let new_atk = item_attack_bonus(&item.kind);
                     if curr_atk != 0 || new_atk != 0 {
                         execute!(stdout, MoveTo(detail_x + 2, start_y + 18), SetForegroundColor(Color::Grey))?;
                         write!(stdout, "ATK: {}->{} ", curr_atk, new_atk)?;
@@ -3226,8 +3301,8 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
                         }
                     }
 
-                    let curr_def = equipped.kind.defense_bonus();
-                    let new_def = item.kind.defense_bonus();
+                    let curr_def = item_defense_bonus(&equipped.kind);
+                    let new_def = item_defense_bonus(&item.kind);
                     if curr_def != 0 || new_def != 0 {
                         execute!(stdout, MoveTo(detail_x + 2, start_y + 19), SetForegroundColor(Color::Grey))?;
                         write!(stdout, "DEF: {}->{} ", curr_def, new_def)?;
@@ -3241,8 +3316,8 @@ fn render_inventory(state: &GameState) -> std::io::Result<()> {
                         }
                     }
 
-                    let curr_hp = equipped.kind.hp_bonus();
-                    let new_hp = item.kind.hp_bonus();
+                    let curr_hp = item_hp_bonus(&equipped.kind);
+                    let new_hp = item_hp_bonus(&item.kind);
                     if curr_hp != 0 || new_hp != 0 {
                         execute!(stdout, MoveTo(detail_x + 2, start_y + 20), SetForegroundColor(Color::Grey))?;
                         write!(stdout, "HP: {}->{} ", curr_hp, new_hp)?;
@@ -3531,7 +3606,7 @@ fn main() -> std::io::Result<()> {
 
     // Class selection (auto-pick random in auto mode)
     let selected_class = if auto_play {
-        let classes = CharacterClass::all();
+        let classes: Vec<_> = CharacterClass::all().collect();
         classes[thread_rng().gen_range(0..classes.len())]
     } else {
         loop {
@@ -3597,8 +3672,8 @@ fn main() -> std::io::Result<()> {
                 }
             }
 
-            let action = AIDecider::decide(&state);
-            state.execute_ai_action(action);
+            let action = state.ai_decide();
+            state.ai_execute(action);
             std::thread::sleep(Duration::from_millis(auto_speed));
             continue;
         }

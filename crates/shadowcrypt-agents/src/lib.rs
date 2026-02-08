@@ -28,10 +28,10 @@ pub mod parallel;
 // Re-export commonly used types
 pub use agents::{Agent, AgentId, AgentKind, AgentState, AgentManager};
 pub use communication::{Message, MessageBus, Event, EventKind};
-pub use behavior::{Behavior, Goal, GoalPriority, BehaviorTree};
+pub use behavior::{BehaviorAction, Goal, GoalPriority, BehaviorTree};
 pub use memory::{Memory, MemoryKind, Knowledge, LearningSystem};
 pub use factions::{Faction, FactionId, FactionRelation, PoliticalSystem};
-pub use personality::{Personality, Trait, Emotion, Mood};
+pub use personality::{Personality, PersonalityTraits, Emotion, Mood};
 pub use relationships::{Relationship, RelationshipKind, SocialNetwork};
 pub use parallel::{AgentScheduler, ParallelExecutor, SyncPrimitive};
 

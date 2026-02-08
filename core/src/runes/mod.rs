@@ -337,6 +337,7 @@ pub enum RuneEffect {
     MaxLightningResist(i32),
     MaxPoisonResist(i32),
     FireAbsorb(i32),              // Percentage absorbed as healing
+    ColdAbsorb(i32),              // Percentage of cold absorbed as healing
 
     // Life and Mana
     BonusMaxLife(i32),
@@ -363,6 +364,9 @@ pub enum RuneEffect {
     CannotBeFrozen,
     SlowStamina(i32),
     Indestructible,
+
+    // Bonus damage
+    BonusDamage(i32),             // Flat bonus damage
 
     // Auras and Summons
     FireAura(i32),                // Damage per turn to nearby enemies
@@ -414,6 +418,7 @@ impl RuneEffect {
             Self::MaxLightningResist(v) => format!("+{}% Max Lightning Resist", v),
             Self::MaxPoisonResist(v) => format!("+{}% Max Poison Resist", v),
             Self::FireAbsorb(v) => format!("{}% Fire Absorb", v),
+            Self::ColdAbsorb(v) => format!("{}% Cold Absorb", v),
             Self::BonusMaxLife(v) => format!("+{} Max Life", v),
             Self::BonusMaxMana(v) => format!("+{} Max Mana", v),
             Self::LifeSteal(v) => format!("{}% Life Stolen per Hit", v),
@@ -434,6 +439,7 @@ impl RuneEffect {
             Self::CannotBeFrozen => "Cannot Be Frozen".to_string(),
             Self::SlowStamina(v) => format!("{}% Slower Stamina Drain", v),
             Self::Indestructible => "Indestructible".to_string(),
+            Self::BonusDamage(v) => format!("+{} Damage", v),
             Self::FireAura(v) => format!("Fire Aura (+{} damage)", v),
             Self::SummonShadow => "Summon Shadow Clone".to_string(),
         }
@@ -1724,6 +1730,8 @@ impl RuneStatBonuses {
                 RuneEffect::Indestructible => self.indestructible = true,
                 RuneEffect::FireAura(v) => self.fire_aura += v,
                 RuneEffect::SummonShadow => self.summon_shadow = true,
+                RuneEffect::ColdAbsorb(v) => self.cold_resist += v,
+                RuneEffect::BonusDamage(v) => self.min_damage += v,
             }
         }
     }

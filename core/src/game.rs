@@ -14,6 +14,7 @@ use crate::world::{Map, Room, Tile, BOSS_LEVELS, MAX_DUNGEON_LEVEL, MAP_WIDTH, M
 use crate::ai::{AIAction, AIDecider};
 use crate::quests::{QuestTracker, QuestReward, QuestId};
 use crate::achievements::{AchievementTracker, AchievementId};
+use crate::npcs::NPCManager;
 
 /// A message with an associated color index
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -29,7 +30,7 @@ impl GameMessage {
 }
 
 /// The main game state
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GameState {
     pub map: Map,
     pub player: Player,
@@ -47,6 +48,7 @@ pub struct GameState {
     pub show_achievements: bool,
     pub quest_tracker: QuestTracker,
     pub achievement_tracker: AchievementTracker,
+    pub npc_manager: NPCManager,
     #[serde(skip, default = "StdRng::from_entropy")]
     pub rng: StdRng,
 }
@@ -84,6 +86,7 @@ impl GameState {
             show_achievements: false,
             quest_tracker,
             achievement_tracker,
+            npc_manager: NPCManager::new(),
             rng,
         };
 
@@ -118,7 +121,8 @@ impl GameState {
             .map(|r| r.center())
             .collect();
 
-        for (i, room) in self.map.rooms.iter().enumerate() {
+        let rooms_clone = self.map.rooms.clone();
+        for (i, room) in rooms_clone.iter().enumerate() {
             if i == 0 {
                 continue;
             }
@@ -952,7 +956,8 @@ impl GameState {
 
         // Tick hunger every 20 turns
         if self.turn_count % 20 == 0 {
-            if let Some(msg) = self.player.tick_hunger() {
+            let hunger_msgs = self.player.tick_hunger();
+            for msg in hunger_msgs {
                 self.add_message(msg, 3);
             }
         }
@@ -1050,6 +1055,7 @@ impl GameState {
         // Phase 3: Process each enemy's autonomous action
         let mut player_attacks: Vec<(usize, i32, Option<StatusEffect>)> = Vec::new();
         let mut enemy_moves: Vec<(usize, usize, usize)> = Vec::new();
+        let mut sound_events: Vec<(usize, usize, usize)> = Vec::new();
 
         // Get positions snapshot to avoid borrow issues
         let enemy_positions: Vec<(u64, usize, usize)> = self.enemies.iter()
@@ -1140,14 +1146,19 @@ impl GameState {
                 }
 
                 EntityAction::MakeNoise(radius) => {
-                    // Alert nearby entities
-                    self.propagate_sound(enemy.x, enemy.y, radius as usize);
+                    // Alert nearby entities (deferred to avoid double mutable borrow)
+                    sound_events.push((enemy.x, enemy.y, radius as usize));
                 }
 
                 _ => {} // Wait or other actions
             }
 
             enemy.acted_this_turn = true;
+        }
+
+        // Propagate deferred sound events
+        for (sx, sy, radius) in sound_events {
+            self.propagate_sound(sx, sy, radius);
         }
 
         // Apply enemy moves
@@ -1372,6 +1383,9 @@ impl GameState {
             .map(|n| (n.id, n.x, n.y))
             .collect();
 
+        // Collect deferred messages to avoid borrowing self during NPC iteration
+        let mut deferred_npc_messages: Vec<(String, u8)> = Vec::new();
+
         // Update each NPC
         for npc in &mut self.npc_manager.npcs {
             // Update NPC state
@@ -1418,7 +1432,7 @@ impl GameState {
                     if self.map.visible[npc.y][npc.x] {
                         if let Some(line) = npc.get_ambient_line(&mut self.rng) {
                             let name = npc.display_name();
-                            self.add_message(format!("{}: \"{}\"", name, line), 9);
+                            deferred_npc_messages.push((format!("{}: \"{}\"", name, line), 9));
                         }
                     }
                 }
@@ -1453,6 +1467,11 @@ impl GameState {
                 }
             }
         }
+
+        // Apply deferred NPC messages
+        for (msg, priority) in deferred_npc_messages {
+            self.add_message(msg, priority);
+        }
     }
 
     /// Process companion autonomous behavior
@@ -1461,82 +1480,113 @@ impl GameState {
 
         let player_pos = (self.player.x, self.player.y);
 
-        // Process each companion
-        for companion in &mut self.player.companions {
-            if !companion.is_alive() {
+        // Collect deferred messages to avoid borrowing self.messages during iteration
+        let mut deferred_messages: Vec<(String, u8)> = Vec::new();
+
+        // Snapshot enemy positions for collision detection
+        let enemy_positions: Vec<(usize, usize, bool)> = self.enemies.iter()
+            .map(|e| (e.x, e.y, e.is_alive()))
+            .collect();
+
+        // Snapshot companion positions for collision detection
+        let companion_positions: Vec<(String, usize, usize)> = self.player.companions.iter()
+            .map(|c| (c.name.clone(), c.x, c.y))
+            .collect();
+
+        let num_companions = self.player.companions.len();
+
+        // Process each companion by index
+        for ci in 0..num_companions {
+            if !self.player.companions[ci].is_alive() {
                 continue;
             }
 
             // Tick companion status effects
-            let tick_damage = companion.tick();
+            let tick_damage = self.player.companions[ci].tick();
             if tick_damage > 0 {
                 // Show status damage if in view
-                if self.map.visible[companion.y][companion.x] {
-                    self.add_message(
-                        format!("{} takes {} status damage!", companion.name, tick_damage),
+                let cy = self.player.companions[ci].y;
+                let cx = self.player.companions[ci].x;
+                if self.map.visible[cy][cx] {
+                    deferred_messages.push((
+                        format!("{} takes {} status damage!", self.player.companions[ci].name, tick_damage),
                         3
-                    );
+                    ));
                 }
             }
 
             // Decide action based on AI
-            let action = CompanionAI::decide(companion, player_pos, &self.enemies, &self.map);
+            let action = CompanionAI::decide(&self.player.companions[ci], player_pos, &self.enemies, &self.map);
 
             match action {
-                CompanionAction::Move(dx, dy) | CompanionAction::Follow => {
-                    let (dx, dy) = if let CompanionAction::Move(dx, dy) = action {
-                        (dx, dy)
-                    } else {
-                        // Follow - move towards player
-                        let dx = (player_pos.0 as i32 - companion.x as i32).signum();
-                        let dy = (player_pos.1 as i32 - companion.y as i32).signum();
-                        (dx, dy)
-                    };
+                CompanionAction::Move(dx, dy) => {
+                    let new_x = (self.player.companions[ci].x as i32 + dx).max(0) as usize;
+                    let new_y = (self.player.companions[ci].y as i32 + dy).max(0) as usize;
 
-                    let new_x = (companion.x as i32 + dx).max(0) as usize;
-                    let new_y = (companion.y as i32 + dy).max(0) as usize;
-
-                    // Check collisions
-                    let blocked = self.enemies.iter()
-                        .any(|e| e.is_alive() && e.x == new_x && e.y == new_y)
+                    // Check collisions using snapshots
+                    let blocked = enemy_positions.iter()
+                        .any(|(ex, ey, alive)| *alive && *ex == new_x && *ey == new_y)
                         || (new_x == self.player.x && new_y == self.player.y)
-                        || self.player.companions.iter()
-                            .any(|c| c.x == new_x && c.y == new_y && c.name != companion.name);
+                        || companion_positions.iter()
+                            .any(|(name, cx, cy)| *cx == new_x && *cy == new_y && *name != self.player.companions[ci].name);
 
                     if self.map.is_walkable(new_x, new_y) && !blocked {
-                        companion.x = new_x;
-                        companion.y = new_y;
+                        self.player.companions[ci].x = new_x;
+                        self.player.companions[ci].y = new_y;
+                    }
+                }
+
+                CompanionAction::Follow => {
+                    // Follow - move towards player
+                    let dx = (player_pos.0 as i32 - self.player.companions[ci].x as i32).signum();
+                    let dy = (player_pos.1 as i32 - self.player.companions[ci].y as i32).signum();
+
+                    let new_x = (self.player.companions[ci].x as i32 + dx).max(0) as usize;
+                    let new_y = (self.player.companions[ci].y as i32 + dy).max(0) as usize;
+
+                    // Check collisions using snapshots
+                    let blocked = enemy_positions.iter()
+                        .any(|(ex, ey, alive)| *alive && *ex == new_x && *ey == new_y)
+                        || (new_x == self.player.x && new_y == self.player.y)
+                        || companion_positions.iter()
+                            .any(|(name, cx, cy)| *cx == new_x && *cy == new_y && *name != self.player.companions[ci].name);
+
+                    if self.map.is_walkable(new_x, new_y) && !blocked {
+                        self.player.companions[ci].x = new_x;
+                        self.player.companions[ci].y = new_y;
                     }
                 }
 
                 CompanionAction::Attack(enemy_idx) => {
                     if enemy_idx < self.enemies.len() && self.enemies[enemy_idx].is_alive() {
-                        let damage = (companion.attack - self.enemies[enemy_idx].defense).max(1);
+                        let damage = (self.player.companions[ci].attack - self.enemies[enemy_idx].defense).max(1);
                         self.enemies[enemy_idx].hp -= damage;
 
                         // Track damage and potentially kills
-                        companion.damage_dealt += damage as u32;
+                        self.player.companions[ci].damage_dealt += damage as u32;
 
-                        if self.map.visible[companion.y][companion.x] {
-                            self.add_message(
+                        let comp_y = self.player.companions[ci].y;
+                        let comp_x = self.player.companions[ci].x;
+                        if self.map.visible[comp_y][comp_x] {
+                            deferred_messages.push((
                                 format!("{} attacks {} for {} damage!",
-                                    companion.name,
+                                    self.player.companions[ci].name,
                                     self.enemies[enemy_idx].kind.name(),
                                     damage),
                                 5 // Green for ally attacks
-                            );
+                            ));
                         }
 
                         // Check if enemy died
                         if !self.enemies[enemy_idx].is_alive() {
-                            companion.kills += 1;
+                            self.player.companions[ci].kills += 1;
                             let xp = self.enemies[enemy_idx].xp_value;
-                            if companion.gain_xp(xp / 2) {
-                                if self.map.visible[companion.y][companion.x] {
-                                    self.add_message(
-                                        format!("{} leveled up to {}!", companion.name, companion.level),
+                            if self.player.companions[ci].gain_xp(xp / 2) {
+                                if self.map.visible[comp_y][comp_x] {
+                                    deferred_messages.push((
+                                        format!("{} leveled up to {}!", self.player.companions[ci].name, self.player.companions[ci].level),
                                         11
-                                    );
+                                    ));
                                 }
                             }
                         }
@@ -1544,28 +1594,30 @@ impl GameState {
                 }
 
                 CompanionAction::UseAbility(enemy_idx) => {
-                    if companion.can_use_ability() {
-                        let ability = companion.use_ability();
-                        let power = companion.ability_power();
+                    if self.player.companions[ci].can_use_ability() {
+                        let ability = self.player.companions[ci].use_ability();
+                        let power = self.player.companions[ci].ability_power();
+                        let comp_x = self.player.companions[ci].x;
+                        let comp_y = self.player.companions[ci].y;
 
-                        if self.map.visible[companion.y][companion.x] {
-                            self.add_message(
-                                format!("{} uses {}!", companion.name, ability.name()),
+                        if self.map.visible[comp_y][comp_x] {
+                            deferred_messages.push((
+                                format!("{} uses {}!", self.player.companions[ci].name, ability.name()),
                                 13 // Magenta for abilities
-                            );
+                            ));
                         }
 
                         // Apply ability effects based on type
                         match ability {
                             crate::companions::CompanionAbility::NatureHeal => {
                                 self.player.hp = (self.player.hp + power).min(self.player.total_max_hp());
-                                self.add_message(format!("You are healed for {}!", power), 5);
+                                deferred_messages.push((format!("You are healed for {}!", power), 5));
                             }
                             crate::companions::CompanionAbility::FrostNova => {
                                 // Freeze nearby enemies
                                 for enemy in &mut self.enemies {
-                                    let dx = (enemy.x as i32 - companion.x as i32).abs();
-                                    let dy = (enemy.y as i32 - companion.y as i32).abs();
+                                    let dx = (enemy.x as i32 - comp_x as i32).abs();
+                                    let dy = (enemy.y as i32 - comp_y as i32).abs();
                                     if dx <= 2 && dy <= 2 && enemy.is_alive() {
                                         enemy.add_status(StatusEffect::Freeze, 2);
                                     }
@@ -1574,8 +1626,8 @@ impl GameState {
                             crate::companions::CompanionAbility::FlameAura => {
                                 // Burn adjacent enemies
                                 for enemy in &mut self.enemies {
-                                    let dx = (enemy.x as i32 - companion.x as i32).abs();
-                                    let dy = (enemy.y as i32 - companion.y as i32).abs();
+                                    let dx = (enemy.x as i32 - comp_x as i32).abs();
+                                    let dy = (enemy.y as i32 - comp_y as i32).abs();
                                     if dx <= 1 && dy <= 1 && enemy.is_alive() {
                                         enemy.hp -= power / 2;
                                         enemy.add_status(StatusEffect::Burn, 3);
@@ -1585,8 +1637,8 @@ impl GameState {
                             crate::companions::CompanionAbility::Terrify => {
                                 // Stun nearby enemies
                                 for enemy in &mut self.enemies {
-                                    let dx = (enemy.x as i32 - companion.x as i32).abs();
-                                    let dy = (enemy.y as i32 - companion.y as i32).abs();
+                                    let dx = (enemy.x as i32 - comp_x as i32).abs();
+                                    let dy = (enemy.y as i32 - comp_y as i32).abs();
                                     if dx <= 3 && dy <= 3 && enemy.is_alive() {
                                         enemy.add_status(StatusEffect::Stun, 2);
                                     }
@@ -1603,42 +1655,53 @@ impl GameState {
                 }
 
                 CompanionAction::Heal => {
-                    if companion.can_use_ability() {
-                        let ability = companion.use_ability();
-                        let power = companion.ability_power();
+                    if self.player.companions[ci].can_use_ability() {
+                        let _ability = self.player.companions[ci].use_ability();
+                        let power = self.player.companions[ci].ability_power();
 
                         self.player.hp = (self.player.hp + power).min(self.player.total_max_hp());
-                        self.add_message(
-                            format!("{} heals you for {} HP!", companion.name, power),
+                        deferred_messages.push((
+                            format!("{} heals you for {} HP!", self.player.companions[ci].name, power),
                             5
-                        );
+                        ));
                     }
                 }
 
                 CompanionAction::Flee => {
                     // Move away from nearest enemy
-                    if let Some(nearest) = self.enemies.iter()
+                    let comp_x = self.player.companions[ci].x;
+                    let comp_y = self.player.companions[ci].y;
+                    let flee_dir = self.enemies.iter()
                         .filter(|e| e.is_alive())
                         .min_by_key(|e| {
-                            let dx = e.x as i32 - companion.x as i32;
-                            let dy = e.y as i32 - companion.y as i32;
+                            let dx = e.x as i32 - comp_x as i32;
+                            let dy = e.y as i32 - comp_y as i32;
                             dx * dx + dy * dy
                         })
-                    {
-                        let dx = (companion.x as i32 - nearest.x as i32).signum();
-                        let dy = (companion.y as i32 - nearest.y as i32).signum();
-                        let new_x = (companion.x as i32 + dx).max(0) as usize;
-                        let new_y = (companion.y as i32 + dy).max(0) as usize;
+                        .map(|nearest| {
+                            let dx = (comp_x as i32 - nearest.x as i32).signum();
+                            let dy = (comp_y as i32 - nearest.y as i32).signum();
+                            (dx, dy)
+                        });
+
+                    if let Some((dx, dy)) = flee_dir {
+                        let new_x = (comp_x as i32 + dx).max(0) as usize;
+                        let new_y = (comp_y as i32 + dy).max(0) as usize;
 
                         if self.map.is_walkable(new_x, new_y) {
-                            companion.x = new_x;
-                            companion.y = new_y;
+                            self.player.companions[ci].x = new_x;
+                            self.player.companions[ci].y = new_y;
                         }
                     }
                 }
 
                 CompanionAction::Wait => {} // Do nothing
             }
+        }
+
+        // Apply deferred messages
+        for (msg, color) in deferred_messages {
+            self.add_message(msg, color);
         }
 
         // Remove dead enemies
@@ -2205,7 +2268,11 @@ impl GameState {
             AIAction::UseItem(idx) => self.use_item(idx),
             AIAction::Descend => self.descend(),
             AIAction::Ascend => self.ascend(),
-            AIAction::Wait => self.end_turn(),
+            AIAction::Wait | AIAction::Rest => self.end_turn(),
+            AIAction::Flee(dx, dy) => self.move_player(dx, dy),
+            AIAction::EquipItem(idx) => self.use_item(idx),
+            AIAction::DropItem(_) => self.end_turn(),
+            AIAction::CycleSkill => self.cycle_skill(),
         }
     }
 

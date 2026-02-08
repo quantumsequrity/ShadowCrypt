@@ -233,6 +233,46 @@ pub enum FactionId {
     InfernalLegions,
     /// Abyssal Horde - chaotic demon swarm
     AbyssalHorde,
+
+    // =========================================================================
+    // MAJOR FACTIONS (8) - Classic roguelike factions
+    // =========================================================================
+    /// Knights of Dawn - holy warrior order
+    KnightsOfDawn,
+    /// Shadow Guild - covert operations network
+    ShadowGuild,
+    /// Mages Circle - arcane research consortium
+    MagesCircle,
+    /// Merchant League - trade and commerce alliance
+    MerchantLeague,
+    /// Warrior Clan - battle-hardened fighters
+    WarriorClan,
+    /// Nature Pact - druidic defenders of the wild
+    NaturePact,
+    /// Undead Legion - organized undead military
+    UndeadLegion,
+    /// Demon Cult - worshippers of demonic powers
+    DemonCult,
+
+    // =========================================================================
+    // MINOR FACTIONS (8) - Smaller specialized groups
+    // =========================================================================
+    /// Pirates - seafaring raiders and smugglers
+    Pirates,
+    /// Nomads - wandering desert/steppe peoples
+    Nomads,
+    /// Monk Order - martial arts practitioners
+    MonkOrder,
+    /// Alchemist Guild - potion makers and researchers
+    AlchemistGuild,
+    /// Hunters Lodge - monster hunters and trackers
+    HuntersLodge,
+    /// Bard College - performers, spies, and lore keepers
+    BardCollege,
+    /// Thieves Guild - organized crime syndicate
+    ThievesGuild,
+    /// Necromancer Coven - practitioners of death magic
+    NecromancerCoven,
 }
 
 impl FactionId {
@@ -292,6 +332,24 @@ impl FactionId {
             Self::VampireCourts,
             Self::InfernalLegions,
             Self::AbyssalHorde,
+            // Major Factions
+            Self::KnightsOfDawn,
+            Self::ShadowGuild,
+            Self::MagesCircle,
+            Self::MerchantLeague,
+            Self::WarriorClan,
+            Self::NaturePact,
+            Self::UndeadLegion,
+            Self::DemonCult,
+            // Minor Factions
+            Self::Pirates,
+            Self::Nomads,
+            Self::MonkOrder,
+            Self::AlchemistGuild,
+            Self::HuntersLodge,
+            Self::BardCollege,
+            Self::ThievesGuild,
+            Self::NecromancerCoven,
         ]
     }
 
@@ -345,6 +403,16 @@ impl FactionId {
             | Self::VampireCourts
             | Self::InfernalLegions
             | Self::AbyssalHorde => FactionCategory::MonsterFaction,
+            // Major factions map to various categories
+            Self::KnightsOfDawn => FactionCategory::ReligiousOrder,
+            Self::ShadowGuild | Self::ThievesGuild => FactionCategory::Guild,
+            Self::MagesCircle | Self::AlchemistGuild | Self::BardCollege => FactionCategory::Guild,
+            Self::MerchantLeague => FactionCategory::Guild,
+            Self::WarriorClan | Self::HuntersLodge => FactionCategory::MercenaryCompany,
+            Self::NaturePact | Self::MonkOrder => FactionCategory::ReligiousOrder,
+            Self::UndeadLegion | Self::NecromancerCoven => FactionCategory::MonsterFaction,
+            Self::DemonCult => FactionCategory::SecretSociety,
+            Self::Pirates | Self::Nomads => FactionCategory::MercenaryCompany,
         }
     }
 
@@ -406,6 +474,24 @@ impl FactionId {
             Self::VampireCourts => "Vampire Courts",
             Self::InfernalLegions => "Infernal Legions",
             Self::AbyssalHorde => "Abyssal Horde",
+            // Major Factions
+            Self::KnightsOfDawn => "Knights of Dawn",
+            Self::ShadowGuild => "Shadow Guild",
+            Self::MagesCircle => "Mages Circle",
+            Self::MerchantLeague => "Merchant League",
+            Self::WarriorClan => "Warrior Clan",
+            Self::NaturePact => "Nature Pact",
+            Self::UndeadLegion => "Undead Legion",
+            Self::DemonCult => "Demon Cult",
+            // Minor Factions
+            Self::Pirates => "Pirates",
+            Self::Nomads => "Nomads",
+            Self::MonkOrder => "Monk Order",
+            Self::AlchemistGuild => "Alchemist Guild",
+            Self::HuntersLodge => "Hunters Lodge",
+            Self::BardCollege => "Bard College",
+            Self::ThievesGuild => "Thieves Guild",
+            Self::NecromancerCoven => "Necromancer Coven",
         }
     }
 
@@ -467,6 +553,24 @@ impl FactionId {
             Self::VampireCourts => "Noble vampire houses engaged in eternal political intrigue while feeding on the living.",
             Self::InfernalLegions => "Organized demon armies under the command of archdevils, seeking to conquer through military might.",
             Self::AbyssalHorde => "Chaotic demon swarms that spread destruction and corruption wherever they go.",
+            // Major Factions
+            Self::KnightsOfDawn => "A holy warrior order dedicated to fighting darkness and protecting the innocent. Their paladins are renowned for their unwavering devotion.",
+            Self::ShadowGuild => "A covert operations network specializing in espionage, sabotage, and information gathering. They work from the shadows to maintain balance.",
+            Self::MagesCircle => "An arcane research consortium dedicated to the study and advancement of magical knowledge. Their towers dot the landscape.",
+            Self::MerchantLeague => "A powerful trade and commerce alliance controlling major trade routes and markets throughout the realm.",
+            Self::WarriorClan => "A battle-hardened clan of fighters who value strength, honor, and martial prowess above all else.",
+            Self::NaturePact => "Druidic defenders of the wild who seek to maintain the balance between civilization and nature.",
+            Self::UndeadLegion => "An organized undead military force led by powerful liches and death knights seeking to expand their domain.",
+            Self::DemonCult => "Secret worshippers of demonic powers who conduct dark rituals to summon and bind infernal beings.",
+            // Minor Factions
+            Self::Pirates => "Seafaring raiders and smugglers who live by their own code on the open waters.",
+            Self::Nomads => "Wandering desert and steppe peoples who follow ancient migration routes and possess unique survival knowledge.",
+            Self::MonkOrder => "Disciplined martial arts practitioners who combine physical perfection with spiritual enlightenment.",
+            Self::AlchemistGuild => "Skilled potion makers and researchers who push the boundaries of alchemical knowledge.",
+            Self::HuntersLodge => "Elite monster hunters and trackers who specialize in eliminating dangerous creatures.",
+            Self::BardCollege => "Performers, spies, and lore keepers who collect and spread knowledge through song and story.",
+            Self::ThievesGuild => "An organized crime syndicate operating in every major city, dealing in theft, smuggling, and blackmail.",
+            Self::NecromancerCoven => "Practitioners of death magic who study the boundaries between life and death.",
         }
     }
 
@@ -622,7 +726,26 @@ impl FactionId {
             | Self::NecropolisDominion
             | Self::VampireCourts
             | Self::InfernalLegions
-            | Self::AbyssalHorde => 90,
+            | Self::AbyssalHorde
+            | Self::DemonCult
+            | Self::NecromancerCoven => 90,
+            // Major factions - moderate difficulty
+            Self::KnightsOfDawn
+            | Self::MagesCircle
+            | Self::MerchantLeague
+            | Self::WarriorClan
+            | Self::NaturePact
+            | Self::MonkOrder
+            | Self::AlchemistGuild
+            | Self::BardCollege => 30,
+            // Shady factions - harder to join
+            Self::ShadowGuild
+            | Self::ThievesGuild
+            | Self::UndeadLegion
+            | Self::Pirates => 70,
+            // Nomadic/loose factions - moderate
+            Self::Nomads
+            | Self::HuntersLodge => 50,
         }
     }
 }
@@ -720,6 +843,37 @@ impl ReputationLevel {
             Self::Honored => "#00BFFF",    // Deep Sky Blue
             Self::Revered => "#9400D3",    // Dark Violet
             Self::Exalted => "#FFD700",    // Gold
+        }
+    }
+
+    /// Get reputation level from a raw value using the Phase 8 range conventions
+    /// Hated(-1000..-500), Hostile(-500..-200), Unfriendly(-200..-50), Neutral(-50..50),
+    /// Friendly(50..200), Honored(200..500), Revered(500..1000), Exalted(1000+)
+    pub fn from_value(rep: i32) -> Self {
+        match rep {
+            r if r < -500 => Self::Hated,
+            r if r < -200 => Self::Hostile,
+            r if r < -50 => Self::Unfriendly,
+            r if r < 50 => Self::Neutral,
+            r if r < 200 => Self::Friendly,
+            r if r < 500 => Self::Honored,
+            r if r < 1000 => Self::Revered,
+            _ => Self::Exalted,
+        }
+    }
+
+    /// Returns a shop price modifier based on reputation level
+    /// Higher reputation = lower prices (discount), lower reputation = higher prices (markup)
+    pub fn price_modifier(&self) -> f32 {
+        match self {
+            Self::Hated => 2.0,       // 200% price (massive markup)
+            Self::Hostile => 1.75,    // 175% price
+            Self::Unfriendly => 1.25, // 125% price
+            Self::Neutral => 1.0,     // 100% price (base)
+            Self::Friendly => 0.90,   // 90% price (10% discount)
+            Self::Honored => 0.80,    // 80% price (20% discount)
+            Self::Revered => 0.70,    // 70% price (30% discount)
+            Self::Exalted => 0.60,    // 60% price (40% discount)
         }
     }
 
@@ -918,6 +1072,7 @@ impl ReputationEffects {
                     mana_bonus: 20,
                     speed_bonus: 5,
                     xp_bonus_percent: 10,
+                    ..Default::default()
                 },
                 title: Some("Exalted".to_string()),
                 mount_access: true,
@@ -1110,6 +1265,183 @@ impl FactionAbility {
             Self::DivineShield => 20,
             Self::DemonicForm => 100,
         }
+    }
+}
+
+// =============================================================================
+// INTER-FACTION RELATIONSHIP MODIFIER
+// =============================================================================
+
+/// Returns a modifier representing the relationship between two factions by name.
+/// Positive values indicate friendship, negative values indicate enmity.
+/// For example, KnightsOfDawn and DemonCult are enemies (returns -0.5).
+///
+/// Uses faction name strings to look up built-in relationship modifiers.
+/// Common relationships:
+/// - KingdomOfLight <-> DarkEmpire: -1.0 (enemies at war)
+/// - CelestialHost <-> InfernalLegions: -1.0 (enemies at war)
+/// - HeavenlySwordSect <-> BloodMoonCult: -0.5 (hostile)
+/// - HumanAlliance <-> DwarvenClans: 0.5 (friendly allies)
+/// - ElvenCourts <-> OrcishHorde: -0.5 (hostile)
+/// - KnightsOfDawn <-> DemonCult: -0.5 (enemies, canonical mapping)
+pub fn faction_relationship_modifier(faction_a: &str, faction_b: &str) -> f32 {
+    // Normalize: canonical relationships
+    let pair = if faction_a < faction_b {
+        (faction_a, faction_b)
+    } else {
+        (faction_b, faction_a)
+    };
+
+    match pair {
+        // Direct enemies at war
+        ("DarkEmpire", "KingdomOfLight") => -1.0,
+        ("CelestialHost", "InfernalLegions") => -1.0,
+        ("AbyssalHorde", "CelestialHost") => -1.0,
+        // Hostile factions
+        ("BloodMoonCult", "HeavenlySwordSect") => -0.5,
+        ("HeavenlySwordSect", "ShadowViperSect") => -0.5,
+        ("AzureCloudMonastery", "SoulDevouringPalace") => -0.5,
+        ("ElvenCourts", "OrcishHorde") => -0.5,
+        ("DemonCult", "KnightsOfDawn") | ("KnightsOfDawn", "UndeadLegion") => -0.5,
+        // Friendly alliances
+        ("DwarvenClans", "HumanAlliance") => 0.5,
+        ("ElvenCourts", "HumanAlliance") => 0.5,
+        ("CelestialHost", "KingdomOfLight") => 0.75,
+        ("DarkEmpire", "NecropolisDominion") => 0.5,
+        // Same-category friends
+        ("AzureCloudMonastery", "HeavenlySwordSect") => 0.3,
+        ("HeavenlySwordSect", "JadePhoenixPavilion") => 0.3,
+        ("AzureCloudMonastery", "JadePhoenixPavilion") => 0.3,
+        ("ElvenCourts", "FaeCourts") => 0.3,
+        // Neutral / no strong relationship
+        _ => 0.0,
+    }
+}
+
+// =============================================================================
+// FACTION REWARD
+// =============================================================================
+
+/// Reward granted by a faction at specific reputation tiers
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FactionReward {
+    /// The reputation level required to earn this reward
+    pub required_level: ReputationLevel,
+    /// Name of the reward
+    pub name: String,
+    /// Description of what the reward grants
+    pub description: String,
+    /// Gold reward amount (if any)
+    pub gold: u32,
+    /// Item reward name (if any)
+    pub item_name: Option<String>,
+    /// Title reward (if any)
+    pub title: Option<String>,
+    /// Stat bonus (if any): (stat_name, amount)
+    pub stat_bonus: Option<(String, i32)>,
+    /// XP bonus percentage (if any)
+    pub xp_bonus_percent: Option<i32>,
+}
+
+impl FactionReward {
+    /// Create a new faction reward
+    pub fn new(required_level: ReputationLevel, name: &str, description: &str) -> Self {
+        Self {
+            required_level,
+            name: name.to_string(),
+            description: description.to_string(),
+            gold: 0,
+            item_name: None,
+            title: None,
+            stat_bonus: None,
+            xp_bonus_percent: None,
+        }
+    }
+
+    /// Set gold reward
+    pub fn with_gold(mut self, gold: u32) -> Self {
+        self.gold = gold;
+        self
+    }
+
+    /// Set item reward
+    pub fn with_item(mut self, item_name: &str) -> Self {
+        self.item_name = Some(item_name.to_string());
+        self
+    }
+
+    /// Set title reward
+    pub fn with_title(mut self, title: &str) -> Self {
+        self.title = Some(title.to_string());
+        self
+    }
+
+    /// Set stat bonus
+    pub fn with_stat_bonus(mut self, stat_name: &str, amount: i32) -> Self {
+        self.stat_bonus = Some((stat_name.to_string(), amount));
+        self
+    }
+
+    /// Returns the tiered unlock rewards for a faction
+    pub fn tiered_rewards_for_faction(faction: FactionId) -> Vec<FactionReward> {
+        let category = faction.category();
+        let mut rewards = Vec::new();
+
+        // Friendly tier rewards
+        rewards.push(
+            FactionReward::new(ReputationLevel::Friendly, "Faction Membership", "Gain access to faction shops and basic quests")
+                .with_gold(100)
+        );
+
+        // Honored tier rewards
+        rewards.push(
+            FactionReward::new(ReputationLevel::Honored, "Faction Gear", "Receive a faction-exclusive piece of equipment")
+                .with_item(&format!("{} Insignia", faction.name()))
+                .with_gold(500)
+        );
+
+        // Revered tier rewards
+        rewards.push(
+            FactionReward::new(ReputationLevel::Revered, "Faction Champion", "Receive a title and stat bonus")
+                .with_title(&format!("Champion of {}", faction.name()))
+                .with_stat_bonus("attack", 3)
+                .with_gold(1000)
+        );
+
+        // Exalted tier rewards
+        rewards.push(
+            FactionReward::new(ReputationLevel::Exalted, "Faction Legend", "Receive legendary gear and a permanent XP bonus")
+                .with_title(&format!("Legend of {}", faction.name()))
+                .with_item(&format!("{} Legendary Artifact", faction.name()))
+                .with_stat_bonus("defense", 5)
+                .with_gold(5000)
+        );
+
+        // Category-specific bonus at Exalted
+        match category {
+            FactionCategory::CultivationSect => {
+                rewards.push(
+                    FactionReward::new(ReputationLevel::Exalted, "Sect Secret Technique", "Learn the sect's ultimate technique")
+                        .with_stat_bonus("mana", 20)
+                );
+            }
+            FactionCategory::Guild => {
+                rewards.push(
+                    FactionReward::new(ReputationLevel::Exalted, "Guild Mastery", "Gain permanent guild mastery bonus")
+                        .with_stat_bonus("speed", 3)
+                );
+            }
+            FactionCategory::Kingdom => {
+                rewards.push(
+                    FactionReward::new(ReputationLevel::Exalted, "Royal Appointment", "Receive a noble title and land grant")
+                        .with_title(&format!("Duke of {}", faction.name()))
+                        .with_gold(10000)
+                );
+            }
+            _ => {}
+        }
+
+        rewards
     }
 }
 

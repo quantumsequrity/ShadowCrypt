@@ -1441,21 +1441,26 @@ impl WorldEventSystem {
 
         // Update active events
         let event_ids: Vec<_> = self.active_events.keys().cloned().collect();
+        let mut chain_triggers = Vec::new();
         for event_id in event_ids {
             if let Some(event) = self.active_events.get_mut(&event_id) {
                 let event_updates = event.tick(self.current_turn);
                 updates.extend(event_updates);
 
-                // Check for chain events
+                // Collect chain event info for later processing
                 if event.is_complete() && !event.phase.is_concluded() {
-                    if let Some(chain_event) = self.check_chain_trigger(event.event_type) {
-                        updates.push(EventUpdate::ChainEventTriggered {
-                            chain_id: 0,
-                            event_type: chain_event,
-                        });
-                        self.schedule_event(chain_event, self.current_turn + 10);
-                    }
+                    chain_triggers.push(event.event_type);
                 }
+            }
+        }
+        // Process chain triggers after releasing mutable borrow
+        for event_type in chain_triggers {
+            if let Some(chain_event) = self.check_chain_trigger(event_type) {
+                updates.push(EventUpdate::ChainEventTriggered {
+                    chain_id: 0,
+                    event_type: chain_event,
+                });
+                self.schedule_event(chain_event, self.current_turn + 10);
             }
         }
 

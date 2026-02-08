@@ -1730,7 +1730,7 @@ pub fn random_ingredient(rng_seed: u64, dungeon_level: u8) -> IngredientKind {
     let tier_roll = (rng % 100) as u8;
 
     // Higher dungeon levels unlock better ingredients
-    let max_category = match dungeon_level {
+    let max_category: u64 = match dungeon_level {
         1..=3 => 2,   // Botanical and Mineral
         4..=6 => 3,   // + Creature
         7..=9 => 4,   // + Essence
@@ -1739,15 +1739,15 @@ pub fn random_ingredient(rng_seed: u64, dungeon_level: u8) -> IngredientKind {
     };
 
     let category = if tier_roll < 40 {
-        0 // Common botanical
+        0u64 // Common botanical
     } else if tier_roll < 65 {
-        (rng % 2) as u8 // Botanical or Mineral
+        rng % 2 // Botanical or Mineral
     } else if tier_roll < 85 {
-        ((rng % 3) as u8).min(max_category - 1)
+        (rng % 3).min(max_category - 1)
     } else if tier_roll < 95 {
-        ((rng % 4) as u8).min(max_category - 1)
+        (rng % 4).min(max_category - 1)
     } else {
-        ((rng % max_category) as u8).min(max_category - 1)
+        (rng % max_category).min(max_category - 1)
     };
 
     let ingredients_by_category: [&[IngredientKind]; 6] = [

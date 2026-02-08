@@ -17,7 +17,74 @@ use shadowcrypt_core::combat::StatusEffect;
 use shadowcrypt_core::items::{EquipSlot, ItemKind, Rarity};
 use shadowcrypt_core::magic::Skill;
 use shadowcrypt_core::prelude::*;
-use shadowcrypt_core::ui::{enemy_color, rarity_color, tile_color, Color};
+// Color struct and helper functions (defined locally since core has no public ui module)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Color {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+}
+
+fn rarity_color(rarity: Rarity) -> Color {
+    match rarity {
+        Rarity::Common => Color::new(180, 180, 180),
+        Rarity::Uncommon => Color::new(80, 200, 80),
+        Rarity::Rare => Color::new(80, 140, 255),
+        Rarity::Epic => Color::new(180, 80, 255),
+        Rarity::Legendary => Color::new(255, 165, 0),
+        Rarity::Mythic => Color::new(255, 50, 50),
+    }
+}
+
+fn enemy_color(kind: EnemyKind) -> Color {
+    match kind {
+        EnemyKind::Goblin | EnemyKind::Kobold | EnemyKind::Hobgoblin => Color::new(100, 180, 100),
+        EnemyKind::Skeleton | EnemyKind::Zombie | EnemyKind::Mummy => Color::new(200, 200, 200),
+        EnemyKind::Ghost | EnemyKind::Wraith | EnemyKind::Banshee => Color::new(150, 200, 255),
+        EnemyKind::Troll | EnemyKind::CaveOgre | EnemyKind::ForestTroll => Color::new(100, 140, 80),
+        EnemyKind::FireElemental | EnemyKind::FireDrake | EnemyKind::Hellhound => Color::new(255, 140, 50),
+        EnemyKind::IceElemental | EnemyKind::IceWraith | EnemyKind::FrostGiant => Color::new(100, 180, 255),
+        _ => Color::new(200, 60, 60),
+    }
+}
+
+fn tile_color(tile: Tile) -> Color {
+    match tile {
+        Tile::Floor => Color::new(80, 80, 90),
+        Tile::Wall => Color::new(120, 110, 100),
+        Tile::StairsDown => Color::new(80, 200, 80),
+        Tile::StairsUp => Color::new(80, 140, 200),
+        Tile::Door | Tile::OpenDoor => Color::new(160, 120, 60),
+        Tile::Water => Color::new(40, 100, 200),
+        Tile::Lava => Color::new(255, 100, 30),
+        Tile::Chest | Tile::OpenChest => Color::new(200, 180, 50),
+        Tile::Shrine | Tile::UsedShrine => Color::new(160, 120, 200),
+        Tile::Trap | Tile::DisarmedTrap => Color::new(200, 60, 60),
+        Tile::BossGate => Color::new(255, 50, 50),
+        _ => Color::new(60, 60, 70),
+    }
+}
+
+fn status_effect_color(effect: StatusEffect) -> Color {
+    match effect {
+        StatusEffect::Poison => Color::new(80, 200, 80),
+        StatusEffect::Burn => Color::new(255, 140, 50),
+        StatusEffect::Freeze => Color::new(100, 200, 255),
+        StatusEffect::Bleed => Color::new(200, 40, 40),
+        StatusEffect::Stun => Color::new(255, 255, 100),
+        StatusEffect::Shield => Color::new(100, 200, 255),
+        StatusEffect::Regeneration => Color::new(80, 255, 80),
+        StatusEffect::Strength => Color::new(255, 100, 100),
+        StatusEffect::Invisibility => Color::new(150, 150, 200),
+        _ => Color::new(200, 200, 200),
+    }
+}
 use std::collections::{HashMap, VecDeque};
 use particles::{process_particle_event, ParticleEvent, ParticleSystem, ParticleType};
 
@@ -78,14 +145,14 @@ impl ThemeColors {
 /// Draw a styled panel frame
 fn draw_panel_frame(painter: &egui::Painter, rect: Rect, title: Option<&str>) {
     // Background with gradient effect (simulated)
-    painter.rect_filled(rect, Rounding::same(4.0), ThemeColors::BACKGROUND_PANEL);
+    painter.rect_filled(rect, Rounding::same(4), ThemeColors::BACKGROUND_PANEL);
 
     // Inner shadow at top
     let shadow_rect = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + 3.0));
-    painter.rect_filled(shadow_rect, Rounding::same(4.0), Color32::from_rgba_unmultiplied(0, 0, 0, 40));
+    painter.rect_filled(shadow_rect, Rounding::same(4), Color32::from_rgba_unmultiplied(0, 0, 0, 40));
 
     // Border with subtle highlight
-    painter.rect_stroke(rect, Rounding::same(4.0), Stroke::new(1.0, ThemeColors::BORDER_DARK));
+    painter.rect_stroke(rect, Rounding::same(4), Stroke::new(1.0, ThemeColors::BORDER_DARK));
     let inner_rect = rect.shrink(1.0);
     painter.rect_stroke(
         Rect::from_min_max(inner_rect.min, Pos2::new(inner_rect.max.x, inner_rect.min.y + 1.0)),
@@ -96,7 +163,7 @@ fn draw_panel_frame(painter: &egui::Painter, rect: Rect, title: Option<&str>) {
     // Title bar if provided
     if let Some(title) = title {
         let title_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 24.0));
-        painter.rect_filled(title_rect, Rounding::same(4.0), ThemeColors::BACKGROUND_LIGHT);
+        painter.rect_filled(title_rect, Rounding::same(4), ThemeColors::BACKGROUND_LIGHT);
         painter.text(
             Pos2::new(rect.min.x + 10.0, rect.min.y + 12.0),
             egui::Align2::LEFT_CENTER,
@@ -117,7 +184,7 @@ fn draw_gradient_bar(
     show_segments: bool,
 ) {
     // Background
-    painter.rect_filled(rect, Rounding::same(3.0), Color32::from_rgb(20, 20, 30));
+    painter.rect_filled(rect, Rounding::same(3), Color32::from_rgb(20, 20, 30));
 
     // Fill
     if fill_ratio > 0.0 {
@@ -159,14 +226,14 @@ fn draw_gradient_bar(
     }
 
     // Border
-    painter.rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0, ThemeColors::BORDER_DARK));
+    painter.rect_stroke(rect, Rounding::same(3), Stroke::new(1.0, ThemeColors::BORDER_DARK));
 }
 
 /// Draw character portrait placeholder
 fn draw_character_portrait(painter: &egui::Painter, rect: Rect, class: CharacterClass) {
     // Frame
-    painter.rect_filled(rect, Rounding::same(4.0), ThemeColors::BACKGROUND_DARK);
-    painter.rect_stroke(rect, Rounding::same(4.0), Stroke::new(2.0, ThemeColors::ACCENT_GOLD));
+    painter.rect_filled(rect, Rounding::same(4), ThemeColors::BACKGROUND_DARK);
+    painter.rect_stroke(rect, Rounding::same(4), Stroke::new(2.0, ThemeColors::ACCENT_GOLD));
 
     // Class icon/symbol
     let symbol = match class {
@@ -219,7 +286,7 @@ fn draw_equipment_slot(
     } else {
         ThemeColors::BACKGROUND_DARK
     };
-    painter.rect_filled(rect, Rounding::same(3.0), bg_color);
+    painter.rect_filled(rect, Rounding::same(3), bg_color);
 
     // Slot border
     let border_color = if item.is_some() {
@@ -227,14 +294,14 @@ fn draw_equipment_slot(
     } else {
         ThemeColors::BORDER_DARK
     };
-    painter.rect_stroke(rect, Rounding::same(3.0), Stroke::new(1.0, border_color));
+    painter.rect_stroke(rect, Rounding::same(3), Stroke::new(1.0, border_color));
 
     if let Some(item) = item {
         // Item rarity glow
         let rarity_col = to_egui_color(rarity_color(item.rarity));
         painter.rect_filled(
             rect.shrink(2.0),
-            Rounding::same(2.0),
+            Rounding::same(2),
             Color32::from_rgba_unmultiplied(rarity_col.r(), rarity_col.g(), rarity_col.b(), 30),
         );
 
@@ -314,7 +381,7 @@ impl LightingConfig {
         let depth_factor = (dungeon_level as f32 / 30.0).min(1.0);
 
         match theme {
-            DungeonTheme::Dungeon => Self {
+            DungeonTheme::DarkDungeon => Self {
                 torch_radius: 8.0 - depth_factor * 1.5,
                 ambient_light: 0.03 - depth_factor * 0.02,
                 fog_density: 0.12 + depth_factor * 0.08,
@@ -322,7 +389,7 @@ impl LightingConfig {
                 torch_color: Color::new(255, 200, 150),
                 ..base
             },
-            DungeonTheme::Cave => Self {
+            DungeonTheme::TwistedCaves => Self {
                 torch_radius: 7.0,
                 ambient_light: 0.01,
                 fog_density: 0.20,
@@ -330,7 +397,7 @@ impl LightingConfig {
                 torch_color: Color::new(255, 230, 180),
                 ..base
             },
-            DungeonTheme::Crypt => Self {
+            DungeonTheme::HauntedCrypt => Self {
                 torch_radius: 6.5,
                 ambient_light: 0.02,
                 fog_density: 0.25,
@@ -338,7 +405,7 @@ impl LightingConfig {
                 torch_color: Color::new(200, 180, 255),
                 ..base
             },
-            DungeonTheme::Forest => Self {
+            DungeonTheme::CursedForest => Self {
                 torch_radius: 9.0,
                 ambient_light: 0.08,
                 fog_density: 0.18,
@@ -346,7 +413,7 @@ impl LightingConfig {
                 torch_color: Color::new(255, 240, 200),
                 ..base
             },
-            DungeonTheme::IceCavern => Self {
+            DungeonTheme::FrozenCaverns => Self {
                 torch_radius: 10.0,
                 ambient_light: 0.06,
                 fog_density: 0.22,
@@ -354,7 +421,7 @@ impl LightingConfig {
                 torch_color: Color::new(200, 220, 255),
                 ..base
             },
-            DungeonTheme::VolcanicLair => Self {
+            DungeonTheme::VolcanicDepths => Self {
                 torch_radius: 7.5,
                 ambient_light: 0.10,
                 fog_density: 0.30,
@@ -379,6 +446,7 @@ impl LightingConfig {
                 falloff_exponent: 2.2,
                 ..base
             },
+            _ => base,
         }
     }
 }
@@ -692,8 +760,8 @@ impl Minimap {
         let minimap_rect = Rect::from_min_size(pos, size);
 
         // Background
-        painter.rect_filled(minimap_rect, Rounding::same(4.0), Color32::from_rgba_unmultiplied(5, 5, 10, 220));
-        painter.rect_stroke(minimap_rect, Rounding::same(4.0), Stroke::new(1.0, ThemeColors::BORDER_LIGHT));
+        painter.rect_filled(minimap_rect, Rounding::same(4), Color32::from_rgba_unmultiplied(5, 5, 10, 220));
+        painter.rect_stroke(minimap_rect, Rounding::same(4), Stroke::new(1.0, ThemeColors::BORDER_LIGHT));
 
         // Draw tiles
         for y in 0..MAP_HEIGHT {
@@ -710,7 +778,7 @@ impl Minimap {
                     Tile::StairsDown => Color32::from_rgb(80, 180, 80),
                     Tile::StairsUp => Color32::from_rgb(80, 140, 180),
                     Tile::Lava => Color32::from_rgb(180, 60, 20),
-                    Tile::Water | Tile::DeepWater => Color32::from_rgb(40, 80, 140),
+                    Tile::Water => Color32::from_rgb(40, 80, 140),
                     Tile::Shrine => Color32::from_rgb(160, 120, 200),
                     _ => Color32::from_rgb(40, 40, 50),
                 };
@@ -982,14 +1050,14 @@ impl ShadowCryptApp {
                 let bar_width = 400.0;
                 let bar_height = 12.0;
                 let bar_rect = Rect::from_center_size(center, Vec2::new(bar_width, bar_height));
-                painter.rect_filled(bar_rect, Rounding::same(6.0), ThemeColors::BACKGROUND_DARK);
+                painter.rect_filled(bar_rect, Rounding::same(6), ThemeColors::BACKGROUND_DARK);
 
                 // Loading bar fill
                 let fill_rect = Rect::from_min_size(
                     bar_rect.min,
                     Vec2::new(bar_width * progress, bar_height),
                 );
-                painter.rect_filled(fill_rect, Rounding::same(6.0), ThemeColors::ACCENT_PURPLE);
+                painter.rect_filled(fill_rect, Rounding::same(6), ThemeColors::ACCENT_PURPLE);
 
                 // Loading text
                 painter.text(
@@ -1038,7 +1106,7 @@ impl ShadowCryptApp {
                     // Class selection frame
                     egui::Frame::none()
                         .fill(ThemeColors::BACKGROUND_PANEL)
-                        .rounding(Rounding::same(8.0))
+                        .rounding(Rounding::same(8))
                         .stroke(Stroke::new(1.0, ThemeColors::BORDER_DARK))
                         .inner_margin(20.0)
                         .show(ui, |ui| {
@@ -1108,7 +1176,7 @@ impl ShadowCryptApp {
                     // Controls hint
                     egui::Frame::none()
                         .fill(ThemeColors::BACKGROUND_DARK)
-                        .rounding(Rounding::same(4.0))
+                        .rounding(Rounding::same(4))
                         .inner_margin(12.0)
                         .show(ui, |ui| {
                             ui.label(RichText::new("Controls")
@@ -1227,14 +1295,15 @@ impl ShadowCryptApp {
 
                     // Floor info with theme color
                     let theme_color = match state.map.theme {
-                        DungeonTheme::Dungeon => ThemeColors::TEXT_NORMAL,
-                        DungeonTheme::Cave => Color32::from_rgb(140, 160, 140),
-                        DungeonTheme::Crypt => Color32::from_rgb(180, 150, 200),
-                        DungeonTheme::Forest => Color32::from_rgb(100, 180, 100),
-                        DungeonTheme::IceCavern => Color32::from_rgb(150, 200, 230),
-                        DungeonTheme::VolcanicLair => Color32::from_rgb(230, 140, 100),
+                        DungeonTheme::DarkDungeon => ThemeColors::TEXT_NORMAL,
+                        DungeonTheme::TwistedCaves => Color32::from_rgb(140, 160, 140),
+                        DungeonTheme::HauntedCrypt => Color32::from_rgb(180, 150, 200),
+                        DungeonTheme::CursedForest => Color32::from_rgb(100, 180, 100),
+                        DungeonTheme::FrozenCaverns => Color32::from_rgb(150, 200, 230),
+                        DungeonTheme::VolcanicDepths => Color32::from_rgb(230, 140, 100),
                         DungeonTheme::AncientRuins => Color32::from_rgb(200, 180, 140),
                         DungeonTheme::DemonRealm => Color32::from_rgb(230, 100, 100),
+                        _ => ThemeColors::TEXT_NORMAL,
                     };
 
                     ui.label(RichText::new(format!("Floor {} - {}", state.dungeon_level, state.map.theme.name()))
@@ -1423,7 +1492,7 @@ impl ShadowCryptApp {
                     ui.add_space(5.0);
 
                     for (effect, duration) in &state.player.status_effects {
-                        let effect_color = shadowcrypt_core::ui::status_effect_color(*effect);
+                        let effect_color = status_effect_color(*effect);
                         ui.label(RichText::new(format!("{} ({})", effect.name(), duration))
                             .size(11.0).color(to_egui_color(effect_color)));
                     }
@@ -1466,7 +1535,7 @@ impl ShadowCryptApp {
                         } else {
                             ThemeColors::BACKGROUND_DARK
                         };
-                        painter.rect_filled(icon_rect, Rounding::same(6.0), bg_color);
+                        painter.rect_filled(icon_rect, Rounding::same(6), bg_color);
 
                         // Border
                         let border_color = if is_active {
@@ -1476,7 +1545,7 @@ impl ShadowCryptApp {
                         } else {
                             ThemeColors::BORDER_DARK
                         };
-                        painter.rect_stroke(icon_rect, Rounding::same(6.0),
+                        painter.rect_stroke(icon_rect, Rounding::same(6),
                             Stroke::new(if is_active { 2.0 } else { 1.0 }, border_color));
 
                         // Skill letter
@@ -1505,7 +1574,7 @@ impl ShadowCryptApp {
                                 Pos2::new(icon_rect.min.x, icon_rect.max.y - icon_rect.height() * cd_ratio),
                                 icon_rect.max,
                             );
-                            painter.rect_filled(overlay_rect, Rounding::same(6.0),
+                            painter.rect_filled(overlay_rect, Rounding::same(6),
                                 Color32::from_rgba_unmultiplied(0, 0, 0, 180));
                             painter.text(icon_rect.center(), egui::Align2::CENTER_CENTER,
                                 format!("{}", cooldown), FontId::proportional(18.0), Color32::WHITE);
@@ -1689,7 +1758,7 @@ impl ShadowCryptApp {
                                 Tile::Lava => {
                                     painter.rect_filled(tile_rect, 0.0, Color32::from_rgba_unmultiplied(150, 40, 20, 100));
                                 }
-                                Tile::Water | Tile::DeepWater => {
+                                Tile::Water => {
                                     painter.rect_filled(tile_rect, 0.0, Color32::from_rgba_unmultiplied(30, 60, 120, 80));
                                 }
                                 Tile::Shrine => {
@@ -1722,7 +1791,7 @@ impl ShadowCryptApp {
                             if is_enemy {
                                 painter.rect_stroke(
                                     tile_rect.shrink(2.0),
-                                    Rounding::same(2.0),
+                                    Rounding::same(2),
                                     Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 60, 60, 100)),
                                 );
                             }
@@ -1807,7 +1876,7 @@ impl ShadowCryptApp {
                 .frame(egui::Frame::default()
                     .fill(ThemeColors::BACKGROUND_PANEL)
                     .stroke(Stroke::new(1.0, ThemeColors::BORDER_LIGHT))
-                    .rounding(Rounding::same(8.0)))
+                    .rounding(Rounding::same(8)))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         if ui.selectable_label(self.settings_tab == SettingsTab::Display, "Display").clicked() {
@@ -1877,7 +1946,7 @@ impl ShadowCryptApp {
                 .frame(egui::Frame::default()
                     .fill(ThemeColors::BACKGROUND_PANEL)
                     .stroke(Stroke::new(1.0, ThemeColors::BORDER_LIGHT))
-                    .rounding(Rounding::same(8.0)))
+                    .rounding(Rounding::same(8)))
                 .show(ctx, |ui| {
                     ui.label(RichText::new("Welcome to ShadowCrypt!").size(16.0).color(ThemeColors::ACCENT_GOLD));
                     ui.add_space(10.0);
@@ -1904,7 +1973,7 @@ impl ShadowCryptApp {
                 .frame(egui::Frame::default()
                     .fill(ThemeColors::BACKGROUND_PANEL)
                     .stroke(Stroke::new(1.0, ThemeColors::BORDER_LIGHT))
-                    .rounding(Rounding::same(8.0)))
+                    .rounding(Rounding::same(8)))
                 .show(ctx, |ui| {
                     if let Some(state) = &self.state {
                         ui.label(RichText::new(format!("Items: {}/20", state.player.inventory.len()))
@@ -1944,7 +2013,7 @@ impl ShadowCryptApp {
                 .frame(egui::Frame::default()
                     .fill(ThemeColors::BACKGROUND_PANEL)
                     .stroke(Stroke::new(1.0, ThemeColors::BORDER_LIGHT))
-                    .rounding(Rounding::same(8.0)))
+                    .rounding(Rounding::same(8)))
                 .show(ctx, |ui| {
                     if let Some(state) = &self.state {
                         ui.label(RichText::new(state.player.class.name()).size(18.0).color(ThemeColors::ACCENT_GOLD));
@@ -2115,7 +2184,7 @@ impl ShadowCryptApp {
                     // Stats frame
                     egui::Frame::none()
                         .fill(ThemeColors::BACKGROUND_PANEL)
-                        .rounding(Rounding::same(8.0))
+                        .rounding(Rounding::same(8))
                         .stroke(Stroke::new(1.0, ThemeColors::BORDER_DARK))
                         .inner_margin(20.0)
                         .show(ui, |ui| {
@@ -2174,7 +2243,7 @@ impl ShadowCryptApp {
                     // Victory stats
                     egui::Frame::none()
                         .fill(ThemeColors::BACKGROUND_PANEL)
-                        .rounding(Rounding::same(8.0))
+                        .rounding(Rounding::same(8))
                         .stroke(Stroke::new(2.0, ThemeColors::ACCENT_GOLD))
                         .inner_margin(25.0)
                         .show(ui, |ui| {

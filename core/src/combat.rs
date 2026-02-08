@@ -2,6 +2,46 @@
 
 use serde::{Serialize, Deserialize};
 
+/// Elemental types for damage and resistances
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum ElementType {
+    Fire,
+    Water,
+    Earth,
+    Wind,
+    Lightning,
+    Ice,
+    Light,
+    Darkness,
+    Void,
+    Chaos,
+    All,
+}
+
+/// Elemental resistances
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ElementalResistances {
+    pub fire: i32,
+    pub ice: i32,
+    pub lightning: i32,
+    pub poison: i32,
+    pub shadow: i32,
+    pub holy: i32,
+    pub arcane: i32,
+}
+
+impl ElementalResistances {
+    pub fn add(&mut self, other: &ElementalResistances) {
+        self.fire += other.fire;
+        self.ice += other.ice;
+        self.lightning += other.lightning;
+        self.poison += other.poison;
+        self.shadow += other.shadow;
+        self.holy += other.holy;
+        self.arcane += other.arcane;
+    }
+}
+
 /// Status effects that can affect entities
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum StatusEffect {

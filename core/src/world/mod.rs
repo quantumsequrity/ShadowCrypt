@@ -137,6 +137,27 @@ pub enum Tile {
     UsedHealingShrine,
     LuckShrine,
     UsedLuckShrine,
+    // Additional tiles needed by dungeon generation
+    Rubble,
+    Brazier,
+    UnlitBrazier,
+    ArmorStand,
+    LockedChest,
+    Mushrooms,
+    GlowingMushrooms,
+    Vines,
+    CrumblingFloor,
+    SporeColony,
+    Statue,
+    CrackedStatue,
+    AcidPool,
+    Altar,
+    Bookshelf,
+    Fountain,
+    BrokenFountain,
+    ScorchedEarth,
+    FrozenGround,
+    MimicChest,
 }
 
 impl Tile {
@@ -240,6 +261,26 @@ impl Tile {
             Self::UsedHealingShrine => '.',
             Self::LuckShrine => '7',
             Self::UsedLuckShrine => '.',
+            Self::Rubble => ',',
+            Self::Brazier => '*',
+            Self::UnlitBrazier => 'o',
+            Self::ArmorStand => 'A',
+            Self::LockedChest => '=',
+            Self::Mushrooms => '"',
+            Self::GlowingMushrooms => '*',
+            Self::Vines => '%',
+            Self::CrumblingFloor => ':',
+            Self::SporeColony => ':',
+            Self::Statue => '&',
+            Self::CrackedStatue => '&',
+            Self::AcidPool => '~',
+            Self::Altar => 'A',
+            Self::Bookshelf => '#',
+            Self::Fountain => 'F',
+            Self::BrokenFountain => 'f',
+            Self::ScorchedEarth => '.',
+            Self::FrozenGround => '.',
+            Self::MimicChest => '=',
         }
     }
 
@@ -338,6 +379,26 @@ impl Tile {
             Self::UsedHealingShrine => 14,
             Self::LuckShrine => 11,
             Self::UsedLuckShrine => 14,
+            Self::Rubble => 0,
+            Self::Brazier => 3,
+            Self::UnlitBrazier => 0,
+            Self::ArmorStand => 1,
+            Self::LockedChest => 11,
+            Self::Mushrooms => 5,
+            Self::GlowingMushrooms => 9,
+            Self::Vines => 6,
+            Self::CrumblingFloor => 0,
+            Self::SporeColony => 5,
+            Self::Statue => 1,
+            Self::CrackedStatue => 0,
+            Self::AcidPool => 5,
+            Self::Altar => 2,
+            Self::Bookshelf => 12,
+            Self::Fountain => 7,
+            Self::BrokenFountain => 8,
+            Self::ScorchedEarth => 0,
+            Self::FrozenGround => 9,
+            Self::MimicChest => 11,
         }
     }
 
@@ -541,6 +602,26 @@ impl Tile {
             Self::UsedHealingShrine => "Used Shrine",
             Self::LuckShrine => "Shrine of Fortune",
             Self::UsedLuckShrine => "Used Shrine",
+            Self::Rubble => "Rubble",
+            Self::Brazier => "Brazier",
+            Self::UnlitBrazier => "Unlit Brazier",
+            Self::ArmorStand => "Armor Stand",
+            Self::LockedChest => "Locked Chest",
+            Self::Mushrooms => "Mushrooms",
+            Self::GlowingMushrooms => "Glowing Mushrooms",
+            Self::Vines => "Vines",
+            Self::CrumblingFloor => "Crumbling Floor",
+            Self::SporeColony => "Spore Colony",
+            Self::Statue => "Statue",
+            Self::CrackedStatue => "Cracked Statue",
+            Self::AcidPool => "Acid Pool",
+            Self::Altar => "Altar",
+            Self::Bookshelf => "Bookshelf",
+            Self::Fountain => "Fountain",
+            Self::BrokenFountain => "Broken Fountain",
+            Self::ScorchedEarth => "Scorched Earth",
+            Self::FrozenGround => "Frozen Ground",
+            Self::MimicChest => "Mimic Chest",
         }
     }
 }
@@ -548,147 +629,203 @@ impl Tile {
 /// Dungeon themes - 10 unique themes for each 10-floor section
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum DungeonTheme {
-    /// Floors 1-10: Dark underground tombs filled with undead
-    Catacombs,
-    /// Floors 11-20: Flooded tunnels with vermin and water hazards
-    Sewers,
-    /// Floors 21-30: Deep earth tunnels with constructs and minerals
-    Mines,
-    /// Floors 31-40: Volcanic depths with fire and demons
-    VolcanicDepths,
-    /// Floors 41-50: Frozen underground with ice and spirits
+    /// Floors 1-10: Classic stone corridors, vermin, goblins
+    DarkDungeon,
+    /// Floors 11-20: Natural caverns, trolls, orcs, elementals
+    TwistedCaves,
+    /// Floors 21-30: Undead tombs, ghosts, vampires, liches
+    HauntedCrypt,
+    /// Floors 31-40: Underground forest, wolves, ents, spirits
+    CursedForest,
+    /// Floors 41-50: Ice tunnels, frost giants, yetis
     FrozenCaverns,
-    /// Floors 51-60: Overgrown ruins with nature and beasts
-    JungleRuins,
-    /// Floors 61-70: Magical caves with crystals and elementals
+    /// Floors 51-60: Lava chambers, fire elementals, dragons
+    VolcanicDepths,
+    /// Floors 61-70: Forgotten temples, golems, sphinxes
+    AncientRuins,
+    /// Floors 71-80: Gem-encrusted caverns, crystal golems
     CrystalCaves,
-    /// Floors 71-80: Reality-warped tunnels with void creatures
-    VoidTunnels,
-    /// Floors 81-90: Celestial realm with divine beings
-    DivineRealm,
-    /// Floors 91-100: The final chaos realm with ultimate challenges
-    Abyss,
+    /// Floors 81-90: Dimensional rifts, aberrations
+    VoidRealm,
+    /// Floors 91-100: Hellish domain of the Demon King
+    DemonRealm,
     /// Secret floors - special hidden areas
     SecretRealm,
+    /// Underground burial tunnels with narrow passages
+    Catacombs,
+    /// Dank waterways beneath cities
+    Sewers,
+    /// Deep excavation tunnels with ore veins
+    Mines,
+    /// Overgrown temple ruins in dense jungle
+    JungleRuins,
+    /// Unstable passages through the void
+    VoidTunnels,
+    /// Celestial realm of divine beings
+    DivineRealm,
+    /// The deepest pit of darkness
+    Abyss,
 }
 
 impl DungeonTheme {
     /// Returns the theme for a given dungeon level
     pub fn from_level(level: u32) -> Self {
         match level {
-            1..=10 => Self::Catacombs,
-            11..=20 => Self::Sewers,
-            21..=30 => Self::Mines,
-            31..=40 => Self::VolcanicDepths,
+            1..=10 => Self::DarkDungeon,
+            11..=20 => Self::TwistedCaves,
+            21..=30 => Self::HauntedCrypt,
+            31..=40 => Self::CursedForest,
             41..=50 => Self::FrozenCaverns,
-            51..=60 => Self::JungleRuins,
-            61..=70 => Self::CrystalCaves,
-            71..=80 => Self::VoidTunnels,
-            81..=90 => Self::DivineRealm,
-            91..=100 => Self::Abyss,
-            _ => Self::Abyss,
+            51..=60 => Self::VolcanicDepths,
+            61..=70 => Self::AncientRuins,
+            71..=80 => Self::CrystalCaves,
+            81..=90 => Self::VoidRealm,
+            91..=100 => Self::DemonRealm,
+            _ => Self::DemonRealm,
         }
     }
 
     /// Returns the default floor tile for this theme
     pub fn floor_tile(&self) -> Tile {
         match self {
+            Self::DarkDungeon => Tile::Floor,
+            Self::TwistedCaves => Tile::Floor,
+            Self::HauntedCrypt => Tile::Floor,
+            Self::CursedForest => Tile::Grass,
+            Self::FrozenCaverns => Tile::Ice,
+            Self::VolcanicDepths => Tile::ObsidianFloor,
+            Self::AncientRuins => Tile::Floor,
+            Self::CrystalCaves => Tile::Floor,
+            Self::VoidRealm => Tile::Floor,
+            Self::DemonRealm => Tile::Floor,
+            Self::SecretRealm => Tile::Floor,
             Self::Catacombs => Tile::Floor,
             Self::Sewers => Tile::Floor,
             Self::Mines => Tile::Floor,
-            Self::VolcanicDepths => Tile::ObsidianFloor,
-            Self::FrozenCaverns => Tile::Ice,
             Self::JungleRuins => Tile::Grass,
-            Self::CrystalCaves => Tile::Floor,
             Self::VoidTunnels => Tile::Floor,
             Self::DivineRealm => Tile::Floor,
             Self::Abyss => Tile::Floor,
-            Self::SecretRealm => Tile::Floor,
         }
     }
 
     /// Returns the display name of this theme
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Catacombs => "The Catacombs",
-            Self::Sewers => "The Sewers",
-            Self::Mines => "The Mines",
-            Self::VolcanicDepths => "The Volcanic Depths",
-            Self::FrozenCaverns => "The Frozen Caverns",
-            Self::JungleRuins => "The Jungle Ruins",
-            Self::CrystalCaves => "The Crystal Caves",
-            Self::VoidTunnels => "The Void Tunnels",
-            Self::DivineRealm => "The Divine Realm",
-            Self::Abyss => "The Abyss",
+            Self::DarkDungeon => "Dark Dungeon",
+            Self::TwistedCaves => "Twisted Caves",
+            Self::HauntedCrypt => "Haunted Crypt",
+            Self::CursedForest => "Cursed Forest",
+            Self::FrozenCaverns => "Frozen Caverns",
+            Self::VolcanicDepths => "Volcanic Depths",
+            Self::AncientRuins => "Ancient Ruins",
+            Self::CrystalCaves => "Crystal Caves",
+            Self::VoidRealm => "Void Realm",
+            Self::DemonRealm => "Demon Realm",
             Self::SecretRealm => "Secret Realm",
+            Self::Catacombs => "Catacombs",
+            Self::Sewers => "Sewers",
+            Self::Mines => "Mines",
+            Self::JungleRuins => "Jungle Ruins",
+            Self::VoidTunnels => "Void Tunnels",
+            Self::DivineRealm => "Divine Realm",
+            Self::Abyss => "Abyss",
         }
     }
 
     /// Returns the description of this theme
     pub fn description(&self) -> &'static str {
         match self {
-            Self::Catacombs => "Dark underground tombs filled with the restless dead",
-            Self::Sewers => "Flooded tunnels teeming with vermin and toxic waters",
-            Self::Mines => "Deep earth passages with ancient constructs guarding precious ores",
-            Self::VolcanicDepths => "Scorching caverns where demons lurk in rivers of magma",
-            Self::FrozenCaverns => "Ice-bound passages haunted by vengeful spirits",
-            Self::JungleRuins => "Overgrown temples reclaimed by savage beasts and nature",
-            Self::CrystalCaves => "Magical caverns where elementals guard arcane treasures",
-            Self::VoidTunnels => "Reality-warped tunnels where aberrations dwell",
-            Self::DivineRealm => "Sacred halls where celestials test the worthy",
-            Self::Abyss => "The realm of pure chaos where only the strongest survive",
+            Self::DarkDungeon => "Classic stone corridors filled with vermin and goblins",
+            Self::TwistedCaves => "Natural caverns with trolls, orcs, and elemental creatures",
+            Self::HauntedCrypt => "Undead-infested tombs with ghosts, vampires, and wraiths",
+            Self::CursedForest => "Underground forest with wolves, ents, and forest spirits",
+            Self::FrozenCaverns => "Ice-covered tunnels with frost giants and yetis",
+            Self::VolcanicDepths => "Lava-filled chambers with fire elementals and hellhounds",
+            Self::AncientRuins => "Forgotten temples guarded by golems and sphinxes",
+            Self::CrystalCaves => "Gem-encrusted caverns where magical constructs dwell",
+            Self::VoidRealm => "Dimensional rifts filled with aberrations and cosmic horrors",
+            Self::DemonRealm => "The final hellish domain of the Demon King",
             Self::SecretRealm => "A hidden dimension between worlds",
+            Self::Catacombs => "Underground burial tunnels with narrow passages and restless dead",
+            Self::Sewers => "Dank waterways beneath cities teeming with vermin and filth",
+            Self::Mines => "Deep excavation tunnels rich with ore veins and cave-ins",
+            Self::JungleRuins => "Overgrown temple ruins reclaimed by dense jungle growth",
+            Self::VoidTunnels => "Unstable passages through the void between dimensions",
+            Self::DivineRealm => "Celestial realm bathed in divine light and holy guardians",
+            Self::Abyss => "The deepest pit of darkness where reality itself breaks down",
         }
     }
 
     /// Returns the primary enemy types for this theme
     pub fn enemy_types(&self) -> &'static [&'static str] {
         match self {
-            Self::Catacombs => &["skeleton", "zombie", "ghost", "wraith", "vampire"],
-            Self::Sewers => &["rat", "slime", "giant_spider", "crocodile", "plague_bearer"],
-            Self::Mines => &["golem", "earth_elemental", "kobold", "dwarf_ghost", "crystal_guardian"],
-            Self::VolcanicDepths => &["fire_elemental", "imp", "hellhound", "demon", "magma_golem"],
-            Self::FrozenCaverns => &["ice_elemental", "frost_spirit", "yeti", "ice_wraith", "frozen_zombie"],
-            Self::JungleRuins => &["giant_snake", "panther", "treant", "jungle_troll", "ancient_guardian"],
-            Self::CrystalCaves => &["crystal_golem", "arcane_elemental", "mana_wyrm", "spell_weaver", "gem_dragon"],
-            Self::VoidTunnels => &["void_spawn", "tentacle_horror", "mind_flayer", "beholder", "dimensional_shambler"],
-            Self::DivineRealm => &["angel", "valkyrie", "celestial_guardian", "seraph", "divine_construct"],
-            Self::Abyss => &["chaos_demon", "elder_horror", "void_lord", "entropy_beast", "primordial"],
+            Self::DarkDungeon => &["rat", "goblin", "skeleton", "kobold", "giant_rat"],
+            Self::TwistedCaves => &["orc", "troll", "slime", "rock_elemental", "giant_spider"],
+            Self::HauntedCrypt => &["zombie", "ghost", "wraith", "vampire", "mummy", "lich"],
+            Self::CursedForest => &["wolf", "treant", "forest_spirit", "corrupted_druid", "dire_wolf"],
+            Self::FrozenCaverns => &["ice_elemental", "frost_giant", "yeti", "ice_wraith", "wendigo"],
+            Self::VolcanicDepths => &["fire_elemental", "imp", "hellhound", "lava_golem", "fire_drake"],
+            Self::AncientRuins => &["golem", "ancient_guardian", "sphinx", "lich", "gargoyle"],
+            Self::CrystalCaves => &["crystal_golem", "arcane_elemental", "spell_weaver", "crystal_construct"],
+            Self::VoidRealm => &["void_spawn", "tentacle_horror", "mind_flayer", "beholder"],
+            Self::DemonRealm => &["demon", "balrog", "pit_fiend", "shadow_demon", "demon_lord"],
             Self::SecretRealm => &["guardian_spirit", "treasure_mimic", "ancient_construct", "secret_keeper"],
+            Self::Catacombs => &["skeleton", "zombie", "ghoul", "bone_golem", "crypt_spider"],
+            Self::Sewers => &["giant_rat", "slime", "crocodile", "plague_bearer", "sewer_lurker"],
+            Self::Mines => &["kobold", "rock_elemental", "cave_troll", "mining_golem", "deep_spider"],
+            Self::JungleRuins => &["jungle_cat", "poison_snake", "vine_creeper", "temple_guardian", "swamp_troll"],
+            Self::VoidTunnels => &["void_walker", "shadow_fiend", "phase_spider", "dimensional_horror"],
+            Self::DivineRealm => &["celestial_guardian", "holy_construct", "seraph", "divine_sentinel"],
+            Self::Abyss => &["abyssal_fiend", "chaos_spawn", "elder_horror", "doom_knight", "abyss_lord"],
         }
     }
 
     /// Returns the hazard tile for this theme
     pub fn hazard_tile(&self) -> Option<Tile> {
         match self {
+            Self::DarkDungeon => Some(Tile::PoisonGas),
+            Self::TwistedCaves => Some(Tile::ToxicPool),
+            Self::HauntedCrypt => None,
+            Self::CursedForest => Some(Tile::PoisonGas),
+            Self::FrozenCaverns => Some(Tile::IceSpikes),
+            Self::VolcanicDepths => Some(Tile::Lava),
+            Self::AncientRuins => None,
+            Self::CrystalCaves => None,
+            Self::VoidRealm => Some(Tile::VoidTendril),
+            Self::DemonRealm => Some(Tile::ChaosField),
+            Self::SecretRealm => None,
             Self::Catacombs => Some(Tile::PoisonGas),
             Self::Sewers => Some(Tile::ToxicPool),
-            Self::Mines => None,
-            Self::VolcanicDepths => Some(Tile::Lava),
-            Self::FrozenCaverns => Some(Tile::IceSpikes),
+            Self::Mines => Some(Tile::Lava),
             Self::JungleRuins => Some(Tile::PoisonGas),
-            Self::CrystalCaves => None,
             Self::VoidTunnels => Some(Tile::VoidTendril),
             Self::DivineRealm => None,
             Self::Abyss => Some(Tile::ChaosField),
-            Self::SecretRealm => None,
         }
     }
 
     /// Returns decorative tiles for this theme
     pub fn decoration_tiles(&self) -> &'static [Tile] {
         match self {
-            Self::Catacombs => &[Tile::Bones, Tile::Cobweb, Tile::Sarcophagus],
+            Self::DarkDungeon => &[Tile::Bones, Tile::Cobweb, Tile::SewerGrate],
+            Self::TwistedCaves => &[Tile::MineCart, Tile::Rails, Tile::Floor],
+            Self::HauntedCrypt => &[Tile::Bones, Tile::Sarcophagus, Tile::Cobweb],
+            Self::CursedForest => &[Tile::JungleVines, Tile::AncientStatue, Tile::Grass],
+            Self::FrozenCaverns => &[Tile::FrozenPool, Tile::Snowdrift, Tile::IceSpikes],
+            Self::VolcanicDepths => &[Tile::MagmaVent, Tile::Lava, Tile::ObsidianFloor],
+            Self::AncientRuins => &[Tile::AncientStatue, Tile::HolyAltar, Tile::Pillar],
+            Self::CrystalCaves => &[Tile::CrystalFormation, Tile::MagicCircle, Tile::GemDeposit],
+            Self::VoidRealm => &[Tile::VoidRift, Tile::Tentacle, Tile::VoidTendril],
+            Self::DemonRealm => &[Tile::ChaosPortal, Tile::AbyssalPit, Tile::ChaosField],
+            Self::SecretRealm => &[Tile::MagicCircle, Tile::SecretPortal, Tile::GoldPile],
+            Self::Catacombs => &[Tile::Bones, Tile::Sarcophagus, Tile::Cobweb],
             Self::Sewers => &[Tile::SewerGrate, Tile::ToxicPool, Tile::Water],
             Self::Mines => &[Tile::MineCart, Tile::Rails, Tile::GemDeposit],
-            Self::VolcanicDepths => &[Tile::MagmaVent, Tile::Lava, Tile::ObsidianFloor],
-            Self::FrozenCaverns => &[Tile::FrozenPool, Tile::Snowdrift, Tile::IceSpikes],
             Self::JungleRuins => &[Tile::JungleVines, Tile::AncientStatue, Tile::Grass],
-            Self::CrystalCaves => &[Tile::CrystalFormation, Tile::MagicCircle, Tile::GemDeposit],
             Self::VoidTunnels => &[Tile::VoidRift, Tile::Tentacle, Tile::VoidTendril],
             Self::DivineRealm => &[Tile::DivineLight, Tile::HolyAltar, Tile::Pillar],
             Self::Abyss => &[Tile::ChaosPortal, Tile::AbyssalPit, Tile::ChaosField],
-            Self::SecretRealm => &[Tile::MagicCircle, Tile::SecretPortal, Tile::GoldPile],
         }
     }
 }
@@ -818,6 +955,13 @@ impl FloorModifiers {
             DungeonTheme::DivineRealm => 0.05,
             DungeonTheme::Abyss => 0.4,
             DungeonTheme::SecretRealm => 0.1,
+            DungeonTheme::DarkDungeon => 0.1,
+            DungeonTheme::TwistedCaves => 0.15,
+            DungeonTheme::HauntedCrypt => 0.1,
+            DungeonTheme::CursedForest => 0.2,
+            DungeonTheme::AncientRuins => 0.1,
+            DungeonTheme::VoidRealm => 0.35,
+            DungeonTheme::DemonRealm => 0.4,
         };
         (base + (level as f32 * 0.005)).min(0.5)
     }
@@ -835,6 +979,13 @@ impl FloorModifiers {
             DungeonTheme::DivineRealm => 1.5,   // Divine light
             DungeonTheme::Abyss => 0.4,
             DungeonTheme::SecretRealm => 1.0,
+            DungeonTheme::DarkDungeon => 0.9,
+            DungeonTheme::TwistedCaves => 0.8,
+            DungeonTheme::HauntedCrypt => 0.7,
+            DungeonTheme::CursedForest => 0.65,
+            DungeonTheme::AncientRuins => 0.85,
+            DungeonTheme::VoidRealm => 0.5,
+            DungeonTheme::DemonRealm => 0.6,
         }
     }
 
@@ -890,6 +1041,32 @@ impl FloorModifiers {
             DungeonTheme::SecretRealm => {
                 mechanics.push(SpecialMechanic::TreasureHoard);
                 mechanics.push(SpecialMechanic::AncientGuardians);
+            }
+            DungeonTheme::DarkDungeon => {
+                mechanics.push(SpecialMechanic::Darkness);
+            }
+            DungeonTheme::TwistedCaves => {
+                mechanics.push(SpecialMechanic::CaveIn);
+            }
+            DungeonTheme::HauntedCrypt => {
+                mechanics.push(SpecialMechanic::UndeadRising);
+                mechanics.push(SpecialMechanic::Darkness);
+            }
+            DungeonTheme::CursedForest => {
+                mechanics.push(SpecialMechanic::Overgrowth);
+                mechanics.push(SpecialMechanic::PoisonCloud);
+            }
+            DungeonTheme::AncientRuins => {
+                mechanics.push(SpecialMechanic::AncientGuardians);
+            }
+            DungeonTheme::VoidRealm => {
+                mechanics.push(SpecialMechanic::RealityWarp);
+                mechanics.push(SpecialMechanic::VoidCorruption);
+            }
+            DungeonTheme::DemonRealm => {
+                mechanics.push(SpecialMechanic::ChaosStorm);
+                mechanics.push(SpecialMechanic::RealityCollapse);
+                mechanics.push(SpecialMechanic::FinalBoss);
             }
         }
 
@@ -1218,6 +1395,22 @@ impl Room {
             for x in (self.x + 1)..(self.x + self.width - 1) {
                 positions.push((x, y));
             }
+        }
+        positions
+    }
+
+    /// Returns the perimeter positions of the room (walls)
+    pub fn perimeter_positions(&self) -> Vec<(usize, usize)> {
+        let mut positions = Vec::new();
+        // Top and bottom edges
+        for x in self.x..=(self.x + self.width.saturating_sub(1)) {
+            positions.push((x, self.y));
+            positions.push((x, self.y + self.height.saturating_sub(1)));
+        }
+        // Left and right edges (excluding corners already added)
+        for y in (self.y + 1)..(self.y + self.height.saturating_sub(1)) {
+            positions.push((self.x, y));
+            positions.push((self.x + self.width.saturating_sub(1), y));
         }
         positions
     }
@@ -1818,6 +2011,60 @@ impl Map {
                 (Tile::StatShrine, 0.20),
                 (Tile::WisdomShrine, 0.15),
                 (Tile::HealingShrine, 0.15),
+            ],
+            DungeonTheme::DarkDungeon => vec![
+                (Tile::Shrine, 0.25),
+                (Tile::HealingShrine, 0.20),
+                (Tile::BlessingShrine, 0.20),
+                (Tile::StatShrine, 0.15),
+                (Tile::LuckShrine, 0.10),
+                (Tile::WisdomShrine, 0.10),
+            ],
+            DungeonTheme::TwistedCaves => vec![
+                (Tile::StatShrine, 0.25),
+                (Tile::WarShrine, 0.20),
+                (Tile::HealingShrine, 0.20),
+                (Tile::Shrine, 0.15),
+                (Tile::LuckShrine, 0.10),
+                (Tile::ChaosShrine, 0.10),
+            ],
+            DungeonTheme::HauntedCrypt => vec![
+                (Tile::CurseShrine, 0.20),
+                (Tile::SacrificeShrine, 0.20),
+                (Tile::Shrine, 0.15),
+                (Tile::WisdomShrine, 0.15),
+                (Tile::HealingShrine, 0.15),
+                (Tile::BlessingShrine, 0.15),
+            ],
+            DungeonTheme::CursedForest => vec![
+                (Tile::HealingShrine, 0.25),
+                (Tile::BlessingShrine, 0.20),
+                (Tile::CurseShrine, 0.15),
+                (Tile::WisdomShrine, 0.15),
+                (Tile::Shrine, 0.15),
+                (Tile::LuckShrine, 0.10),
+            ],
+            DungeonTheme::AncientRuins => vec![
+                (Tile::WisdomShrine, 0.25),
+                (Tile::BlessingShrine, 0.20),
+                (Tile::StatShrine, 0.15),
+                (Tile::TeleportShrine, 0.15),
+                (Tile::Shrine, 0.15),
+                (Tile::HealingShrine, 0.10),
+            ],
+            DungeonTheme::VoidRealm => vec![
+                (Tile::ChaosShrine, 0.25),
+                (Tile::TeleportShrine, 0.20),
+                (Tile::CurseShrine, 0.20),
+                (Tile::SacrificeShrine, 0.15),
+                (Tile::Shrine, 0.20),
+            ],
+            DungeonTheme::DemonRealm => vec![
+                (Tile::ChaosShrine, 0.25),
+                (Tile::SacrificeShrine, 0.20),
+                (Tile::CurseShrine, 0.20),
+                (Tile::WarShrine, 0.20),
+                (Tile::StatShrine, 0.15),
             ],
         }
     }

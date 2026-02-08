@@ -476,8 +476,9 @@ pub enum QuestStateRequirement {
 }
 
 /// Time of day requirements
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TimeRequirement {
+    #[default]
     Day,
     Night,
     Dawn,

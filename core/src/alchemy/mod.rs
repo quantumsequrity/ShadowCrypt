@@ -1657,7 +1657,8 @@ impl SideEffect {
             Self::MeridianDamage { severity } => 3 + severity,
             Self::SpiritWeakening { .. } => 4,
             Self::MajorQiDeviation { .. } => 5,
-            Self::FoundationDamage { .. } | Self::SoulDamage { severity } => 6 + severity,
+            Self::FoundationDamage { .. } => 6,
+            Self::SoulDamage { severity } => 6 + severity,
             Self::CultivationRegression { levels } => 7 + levels,
             Self::WithdrawalSymptoms { severity } => 2 + severity,
             Self::IncreasedTolerance { .. } => 3,
@@ -2297,19 +2298,21 @@ impl AlchemySystem {
             return None;
         }
         let pill = self.pill_inventory.remove(pill_index);
-        let addiction = self.addictions.entry(pill.pill_type).or_insert_with(|| PillAddiction::new(pill.pill_type));
-        addiction.consume(self.current_turn);
-        let effectiveness = addiction.effectiveness_multiplier();
+        let (effectiveness, addiction_level, tolerance_level) = {
+            let addiction = self.addictions.entry(pill.pill_type).or_insert_with(|| PillAddiction::new(pill.pill_type));
+            addiction.consume(self.current_turn);
+            (addiction.effectiveness_multiplier(), addiction.addiction_level, addiction.tolerance_level)
+        };
         let effective_value = (pill.effect_value as f32 * effectiveness) as i32;
-        let side_effects = self.determine_side_effects(&pill, addiction.addiction_level);
+        let side_effects = self.determine_side_effects(&pill, addiction_level);
 
         Some(PillConsumptionResult {
             pill_type: pill.pill_type,
             effect_value: effective_value,
             duration: pill.duration,
             side_effects,
-            addiction_increased: addiction.addiction_level,
-            tolerance_warning: addiction.tolerance_level > 1.5,
+            addiction_increased: addiction_level,
+            tolerance_warning: tolerance_level > 1.5,
         })
     }
 

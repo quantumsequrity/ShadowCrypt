@@ -283,8 +283,8 @@ fn process_agent(work: &WorkItem) -> Option<AgentAction> {
     // Default: random movement
     let mut rng = rand::thread_rng();
     use rand::Rng;
-    let dx = rng.gen_range(-1..=1);
-    let dy = rng.gen_range(-1..=1);
+    let dx = rng.r#gen_range(-1..=1);
+    let dy = rng.r#gen_range(-1..=1);
     Some(AgentAction::Move { dx, dy })
 }
 

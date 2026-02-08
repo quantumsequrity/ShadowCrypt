@@ -305,7 +305,7 @@ impl RoomType {
 
             // Mid-late game
             Self::HordeRoom | Self::ArtifactRoom | Self::SequenceRoom | Self::ArrowGallery => 8,
-            Self::ChampionArena | Self::MeditationRoom | Self::Apothecary | Self::TomeVault => 8,
+            Self::ChampionArena | Self::MeditationRoom | Self::Apothecary | Self::Armory | Self::TomeVault => 8,
             Self::RuneForge | Self::CrystalGarden | Self::ExecutionRoom => 8,
 
             // Late game
@@ -364,36 +364,36 @@ impl RoomType {
 
         // Apply theme modifiers
         let theme_modifier = match (self, theme) {
-            // Dungeon theme bonuses
-            (Self::DungeonCell | Self::TortureChamber | Self::Storage, DungeonTheme::Dungeon) => 1.5,
-            (Self::GuardPost | Self::Barracks, DungeonTheme::Dungeon) => 1.3,
+            // DarkDungeon theme bonuses
+            (Self::DungeonCell | Self::TortureChamber | Self::Storage, DungeonTheme::DarkDungeon) => 1.5,
+            (Self::GuardPost | Self::Barracks, DungeonTheme::DarkDungeon) => 1.3,
 
-            // Cave theme bonuses
-            (Self::MushroomGarden | Self::CrystalGarden, DungeonTheme::Cave) => 2.0,
-            (Self::HordeRoom, DungeonTheme::Cave) => 1.5,
+            // TwistedCaves theme bonuses
+            (Self::MushroomGarden | Self::CrystalGarden, DungeonTheme::TwistedCaves) => 2.0,
+            (Self::HordeRoom, DungeonTheme::TwistedCaves) => 1.5,
 
-            // Crypt theme bonuses
-            (Self::Crypt | Self::Ossuary, DungeonTheme::Crypt) => 2.0,
-            (Self::NecromancerDen | Self::DarkAltar, DungeonTheme::Crypt) => 1.8,
-            (Self::SacrificeAltar | Self::BloodAltar, DungeonTheme::Crypt) => 1.5,
+            // HauntedCrypt theme bonuses
+            (Self::Crypt | Self::Ossuary, DungeonTheme::HauntedCrypt) => 2.0,
+            (Self::NecromancerDen | Self::DarkAltar, DungeonTheme::HauntedCrypt) => 1.8,
+            (Self::SacrificeAltar | Self::BloodAltar, DungeonTheme::HauntedCrypt) => 1.5,
 
-            // Forest theme bonuses
-            (Self::HerbGarden | Self::MushroomGarden, DungeonTheme::Forest) => 2.0,
-            (Self::MeditationRoom | Self::SafeHaven, DungeonTheme::Forest) => 1.3,
+            // CursedForest theme bonuses
+            (Self::HerbGarden | Self::MushroomGarden, DungeonTheme::CursedForest) => 2.0,
+            (Self::MeditationRoom | Self::SafeHaven, DungeonTheme::CursedForest) => 1.3,
 
-            // Ice theme bonuses
-            (Self::CrystalGarden, DungeonTheme::IceCavern) => 2.0,
-            (Self::HotSpring, DungeonTheme::IceCavern) => 1.5,
+            // FrozenCaverns theme bonuses
+            (Self::CrystalGarden, DungeonTheme::FrozenCaverns) => 2.0,
+            (Self::HotSpring, DungeonTheme::FrozenCaverns) => 1.5,
 
-            // Volcanic theme bonuses
-            (Self::ElementalForge | Self::SmithyForge, DungeonTheme::VolcanicLair) => 2.0,
-            (Self::ElementalAltar, DungeonTheme::VolcanicLair) => 1.5,
+            // VolcanicDepths theme bonuses
+            (Self::ElementalForge | Self::SmithyForge, DungeonTheme::VolcanicDepths) => 2.0,
+            (Self::ElementalAltar, DungeonTheme::VolcanicDepths) => 1.5,
 
-            // Ancient Ruins bonuses
+            // AncientRuins bonuses
             (Self::AncientLibrary | Self::ScrollArchive | Self::TomeVault, DungeonTheme::AncientRuins) => 2.0,
             (Self::AncientAltar | Self::AbandonedThrone, DungeonTheme::AncientRuins) => 1.8,
 
-            // Demon Realm bonuses
+            // DemonRealm bonuses
             (Self::DarkAltar | Self::BloodAltar | Self::SacrificeAltar, DungeonTheme::DemonRealm) => 2.0,
             (Self::BossLair | Self::ThroneRoom, DungeonTheme::DemonRealm) => 1.5,
 
@@ -464,13 +464,13 @@ impl RoomShape {
     /// Returns a random shape with appropriate weights
     pub fn random(rng: &mut impl Rng, theme: DungeonTheme) -> Self {
         let weights: Vec<(Self, f64)> = match theme {
-            DungeonTheme::Cave => vec![
+            DungeonTheme::TwistedCaves => vec![
                 (Self::Rectangle, 0.15),
                 (Self::Circle, 0.20),
                 (Self::Irregular, 0.30),
                 (Self::CaveLike, 0.35),
             ],
-            DungeonTheme::Dungeon | DungeonTheme::Crypt => vec![
+            DungeonTheme::DarkDungeon | DungeonTheme::HauntedCrypt => vec![
                 (Self::Rectangle, 0.50),
                 (Self::LShape, 0.15),
                 (Self::TShape, 0.10),
@@ -864,7 +864,7 @@ impl ThemeTileSet {
     /// Get tileset for a specific theme
     pub fn for_theme(theme: DungeonTheme) -> Self {
         match theme {
-            DungeonTheme::Dungeon => Self {
+            DungeonTheme::DarkDungeon => Self {
                 floor_tiles: vec![
                     (Tile::Floor, 0.85),
                     (Tile::Bones, 0.05),
@@ -889,7 +889,7 @@ impl ThemeTileSet {
                 ambient_light: 0.4,
                 fog_density: 0.2,
             },
-            DungeonTheme::Cave => Self {
+            DungeonTheme::TwistedCaves => Self {
                 floor_tiles: vec![
                     (Tile::Floor, 0.70),
                     (Tile::Rubble, 0.10),
@@ -920,7 +920,7 @@ impl ThemeTileSet {
                 ambient_light: 0.2,
                 fog_density: 0.3,
             },
-            DungeonTheme::Crypt => Self {
+            DungeonTheme::HauntedCrypt => Self {
                 floor_tiles: vec![
                     (Tile::Floor, 0.70),
                     (Tile::Bones, 0.15),
@@ -951,7 +951,7 @@ impl ThemeTileSet {
                 ambient_light: 0.15,
                 fog_density: 0.4,
             },
-            DungeonTheme::Forest => Self {
+            DungeonTheme::CursedForest => Self {
                 floor_tiles: vec![
                     (Tile::Grass, 0.70),
                     (Tile::Floor, 0.10),
@@ -982,7 +982,7 @@ impl ThemeTileSet {
                 ambient_light: 0.6,
                 fog_density: 0.15,
             },
-            DungeonTheme::IceCavern => Self {
+            DungeonTheme::FrozenCaverns => Self {
                 floor_tiles: vec![
                     (Tile::Ice, 0.60),
                     (Tile::FrozenGround, 0.20),
@@ -1011,7 +1011,7 @@ impl ThemeTileSet {
                 ambient_light: 0.5,
                 fog_density: 0.25,
             },
-            DungeonTheme::VolcanicLair => Self {
+            DungeonTheme::VolcanicDepths => Self {
                 floor_tiles: vec![
                     (Tile::ScorchedEarth, 0.50),
                     (Tile::Floor, 0.30),
@@ -1104,6 +1104,34 @@ impl ThemeTileSet {
                 ],
                 ambient_light: 0.3,
                 fog_density: 0.5,
+            },
+            _ => Self {
+                floor_tiles: vec![
+                    (Tile::Floor, 0.85),
+                    (Tile::Rubble, 0.10),
+                    (Tile::Bones, 0.05),
+                ],
+                wall_decoration: vec![
+                    (Tile::Cobweb, 0.25),
+                    (Tile::Brazier, 0.25),
+                    (Tile::Pillar, 0.25),
+                    (Tile::Statue, 0.25),
+                ],
+                hazards: vec![
+                    (Tile::Trap, 0.4),
+                    (Tile::SpikeTrap, 0.3),
+                    (Tile::CrumblingFloor, 0.2),
+                    (Tile::PoisonGas, 0.1),
+                ],
+                features: vec![
+                    (Tile::Chest, 0.30),
+                    (Tile::Pillar, 0.25),
+                    (Tile::Door, 0.20),
+                    (Tile::LockedChest, 0.15),
+                    (Tile::Altar, 0.10),
+                ],
+                ambient_light: 0.4,
+                fog_density: 0.2,
             },
         }
     }
@@ -2202,7 +2230,8 @@ impl DungeonGenerator {
 
     /// Add environmental hazards
     fn add_hazards(&mut self, map: &mut Map, rng: &mut impl Rng) {
-        for room in &self.rooms {
+        let rooms = self.rooms.clone();
+        for room in &rooms {
             // Skip safe rooms
             if room.room_type.is_safe() {
                 continue;
@@ -2210,22 +2239,22 @@ impl DungeonGenerator {
 
             // Add hazards based on theme
             match self.theme {
-                DungeonTheme::VolcanicLair | DungeonTheme::DemonRealm => {
+                DungeonTheme::VolcanicDepths | DungeonTheme::DemonRealm => {
                     if rng.gen_bool(self.config.hazard_density * 2.0) {
                         self.add_lava_hazard(map, room, rng);
                     }
                 }
-                DungeonTheme::IceCavern => {
+                DungeonTheme::FrozenCaverns => {
                     if rng.gen_bool(self.config.hazard_density * 2.0) {
                         self.add_ice_hazard(map, room, rng);
                     }
                 }
-                DungeonTheme::Cave => {
+                DungeonTheme::TwistedCaves => {
                     if rng.gen_bool(self.config.hazard_density) {
                         self.add_water_hazard(map, room, rng);
                     }
                 }
-                DungeonTheme::Crypt => {
+                DungeonTheme::HauntedCrypt => {
                     if rng.gen_bool(self.config.hazard_density) {
                         self.add_poison_hazard(map, room, rng);
                     }
@@ -2608,9 +2637,9 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         for theme in &[
-            DungeonTheme::Dungeon,
-            DungeonTheme::Cave,
-            DungeonTheme::Crypt,
+            DungeonTheme::DarkDungeon,
+            DungeonTheme::TwistedCaves,
+            DungeonTheme::HauntedCrypt,
         ] {
             let shape = RoomShape::random(&mut rng, *theme);
             assert!(shape.size_multiplier() >= 1.0);
@@ -2632,12 +2661,12 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         for theme in &[
-            DungeonTheme::Dungeon,
-            DungeonTheme::Cave,
-            DungeonTheme::Crypt,
-            DungeonTheme::Forest,
-            DungeonTheme::IceCavern,
-            DungeonTheme::VolcanicLair,
+            DungeonTheme::DarkDungeon,
+            DungeonTheme::TwistedCaves,
+            DungeonTheme::HauntedCrypt,
+            DungeonTheme::CursedForest,
+            DungeonTheme::FrozenCaverns,
+            DungeonTheme::VolcanicDepths,
             DungeonTheme::AncientRuins,
             DungeonTheme::DemonRealm,
         ] {
@@ -2662,11 +2691,11 @@ mod tests {
 
     #[test]
     fn test_room_type_weights() {
-        let combat_weight = RoomType::StandardCombat.spawn_weight(5, DungeonTheme::Dungeon);
+        let combat_weight = RoomType::StandardCombat.spawn_weight(5, DungeonTheme::DarkDungeon);
         assert!(combat_weight > 0.0);
 
         // Boss lair should have lower weight than combat
-        let boss_weight = RoomType::BossLair.spawn_weight(5, DungeonTheme::Dungeon);
+        let boss_weight = RoomType::BossLair.spawn_weight(5, DungeonTheme::DarkDungeon);
         assert!(boss_weight < combat_weight);
     }
 }

@@ -680,30 +680,30 @@ impl ParticleSystem {
         );
 
         match theme {
-            DungeonTheme::Dungeon | DungeonTheme::Cave => {
+            DungeonTheme::DarkDungeon | DungeonTheme::TwistedCaves => {
                 self.spawn(ParticleType::DungeonDust, pos);
             }
-            DungeonTheme::Crypt => {
+            DungeonTheme::HauntedCrypt => {
                 self.spawn(ParticleType::Dust, pos);
                 if r3 < 0.3 {
                     self.spawn(ParticleType::ShadowWisp, pos);
                 }
             }
-            DungeonTheme::Forest => {
+            DungeonTheme::CursedForest => {
                 if r3 < 0.5 {
                     self.spawn(ParticleType::Leaf, pos);
                 } else {
                     self.spawn(ParticleType::Pollen, pos);
                 }
             }
-            DungeonTheme::IceCavern => {
+            DungeonTheme::FrozenCaverns => {
                 if r3 < 0.6 {
                     self.spawn(ParticleType::SnowParticle, pos);
                 } else {
                     self.spawn(ParticleType::FrostMist, pos);
                 }
             }
-            DungeonTheme::VolcanicLair => {
+            DungeonTheme::VolcanicDepths => {
                 if r3 < 0.33 {
                     self.spawn(ParticleType::Ash, pos);
                 } else if r3 < 0.66 {
@@ -726,6 +726,9 @@ impl ParticleSystem {
                 } else {
                     self.spawn(ParticleType::LavaEmber, pos);
                 }
+            }
+            _ => {
+                self.spawn(ParticleType::Dust, pos);
             }
         }
     }
@@ -768,8 +771,8 @@ impl ParticleSystem {
         if self.ambient_enabled {
             self.ambient_timer += dt;
             let spawn_interval = match theme {
-                DungeonTheme::VolcanicLair | DungeonTheme::DemonRealm => 0.05,
-                DungeonTheme::Forest | DungeonTheme::IceCavern => 0.08,
+                DungeonTheme::VolcanicDepths | DungeonTheme::DemonRealm => 0.05,
+                DungeonTheme::CursedForest | DungeonTheme::FrozenCaverns => 0.08,
                 _ => 0.15,
             };
 

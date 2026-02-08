@@ -8,13 +8,7 @@ use rand::prelude::*;
 use std::time::Instant;
 
 use shadowcrypt_core::prelude::*;
-use shadowcrypt_core::ui::Color;
 use shadowcrypt_agents::prelude::*;
-
-/// Convert our color type to egui color
-fn to_egui_color(color: Color) -> egui::Color32 {
-    egui::Color32::from_rgb(color.r, color.g, color.b)
-}
 
 /// Application state
 enum AppState {
@@ -126,16 +120,20 @@ impl MultiAgentApp {
         self.agents.process_turn();
 
         // Process communications
-        let messages = self.agents.message_bus.messages.clone();
-        for msg in messages.iter().take(5) {
-            let from_name = self.agents.get(msg.from)
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "Unknown".to_string());
-            let to_name = self.agents.get(msg.to)
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            self.add_comm(format!("[{}] {} -> {}: {}", self.turn, from_name, to_name, msg.content));
+        let comm_strings: Vec<String> = {
+            let messages = self.agents.message_bus.recent_messages(5);
+            messages.iter().map(|msg| {
+                let from_name = self.agents.get(msg.from)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let to_name = self.agents.get(msg.to)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                format!("[{}] {} -> {}: {}", self.turn, from_name, to_name, msg.content)
+            }).collect()
+        };
+        for s in comm_strings {
+            self.add_comm(s);
         }
 
         // Periodic events

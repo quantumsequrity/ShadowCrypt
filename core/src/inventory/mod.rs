@@ -376,7 +376,14 @@ impl ItemCategory {
             | ItemKind::SoulGem
             | ItemKind::AncientRelic
             | ItemKind::DragonScale
-            | ItemKind::DemonHeart => Self::Materials,
+            | ItemKind::DemonHeart
+            | ItemKind::Fish
+            | ItemKind::RareFish
+            | ItemKind::LegendaryFish
+            | ItemKind::OreChunk
+            | ItemKind::GemFragment
+            | ItemKind::PerfectGem
+            | ItemKind::TournamentReward => Self::Materials,
         }
     }
 }
@@ -718,6 +725,13 @@ pub fn item_weight(kind: ItemKind) -> f32 {
         ItemKind::AncientRelic => 1.0,
         ItemKind::DragonScale => 0.5,
         ItemKind::DemonHeart => 0.5,
+        ItemKind::Fish => 0.3,
+        ItemKind::RareFish => 0.4,
+        ItemKind::LegendaryFish => 0.5,
+        ItemKind::OreChunk => 1.0,
+        ItemKind::GemFragment => 0.2,
+        ItemKind::PerfectGem => 0.3,
+        ItemKind::TournamentReward => 0.5,
     }
 }
 
@@ -919,6 +933,13 @@ pub fn item_value(kind: ItemKind, rarity: Rarity) -> u32 {
         ItemKind::AncientRelic => 1000,
         ItemKind::DragonScale => 200,
         ItemKind::DemonHeart => 300,
+        ItemKind::Fish => 5,
+        ItemKind::RareFish => 25,
+        ItemKind::LegendaryFish => 100,
+        ItemKind::OreChunk => 15,
+        ItemKind::GemFragment => 30,
+        ItemKind::PerfectGem => 200,
+        ItemKind::TournamentReward => 500,
     };
 
     // Apply rarity multiplier

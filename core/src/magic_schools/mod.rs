@@ -246,6 +246,7 @@ pub struct Spell {
 
 impl Spell {
     pub fn new(name: &str, school: MagicSchool, tier: u8, mana: i32, cooldown: u32, effect: SpellEffect) -> Self {
+        let description = effect.describe();
         Self {
             name: name.to_string(),
             school,
@@ -253,7 +254,7 @@ impl Spell {
             mana_cost: mana,
             cooldown,
             effect,
-            description: effect.describe(),
+            description,
             current_cooldown: 0,
         }
     }

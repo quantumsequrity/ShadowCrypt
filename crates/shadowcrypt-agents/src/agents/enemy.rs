@@ -88,7 +88,7 @@ impl EnemyBehaviors {
     /// Gets taunt dialogue for an enemy
     pub fn taunt<R: Rng>(kind: AgentKind, rng: &mut R) -> String {
         let taunts = Self::taunts_for_kind(kind);
-        taunts[rng.gen_range(0..taunts.len())].to_string()
+        taunts[rng.r#gen_range(0..taunts.len())].to_string()
     }
 
     /// Gets all taunts for an enemy kind

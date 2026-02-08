@@ -116,6 +116,9 @@ pub enum GoalKind {
     AlertMaster,
     PickUpItems,
 
+    // Stealth
+    Hide,
+
     // Entertainment
     Entertain,
     Play,
@@ -131,6 +134,7 @@ pub enum GoalKind {
     AdjustDifficulty,
 
     // Environmental goals
+    AdjustEnvironment,
     ManageWeather,
     ManageTime,
     ManageSeason,
@@ -446,8 +450,8 @@ impl BehaviorAction {
         match self {
             Self::Idle | Self::Wait => Some(AgentAction::Wait),
             Self::Wander => {
-                let dx = rng.gen_range(-1..=1);
-                let dy = rng.gen_range(-1..=1);
+                let dx = rng.r#gen_range(-1..=1);
+                let dy = rng.r#gen_range(-1..=1);
                 Some(AgentAction::Move { dx, dy })
             }
             Self::Flee => {
@@ -499,8 +503,8 @@ impl BehaviorAction {
             }
             Self::Patrol => {
                 // Random patrol movement
-                let dx = rng.gen_range(-1..=1);
-                let dy = rng.gen_range(-1..=1);
+                let dx = rng.r#gen_range(-1..=1);
+                let dy = rng.r#gen_range(-1..=1);
                 Some(AgentAction::Move { dx, dy })
             }
             Self::Work => {
@@ -511,7 +515,7 @@ impl BehaviorAction {
                 // Greet nearby agents
                 let dialogues = crate::agents::NpcBehaviors::dialogues_for_kind(agent.kind);
                 if !dialogues.is_empty() {
-                    let msg = dialogues[rng.gen_range(0..dialogues.len())].to_string();
+                    let msg = dialogues[rng.r#gen_range(0..dialogues.len())].to_string();
                     Some(AgentAction::Speak { message: msg, target: None })
                 } else {
                     Some(AgentAction::Wait)

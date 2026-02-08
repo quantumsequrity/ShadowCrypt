@@ -50,6 +50,7 @@ pub mod items;
 pub mod entities;
 pub mod world;
 pub mod weather;
+pub mod armor;
 pub mod ai;
 pub mod companions;
 pub mod challenges;
