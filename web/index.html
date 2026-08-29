@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="ShadowCrypt Online — a cross-platform action MMORPG. Descend the crypt, build your haven, farm, and battle other players.">
+  <title>ShadowCrypt Online</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Boot / title screen -->
+  <div id="boot-screen" class="screen">
+    <div class="title-wrap">
+      <h1 class="game-title">SHADOW<span>CRYPT</span></h1>
+      <div class="game-subtitle">ONLINE</div>
+      <div class="title-tagline">Descend. Build. Farm. Conquer.</div>
+      <div id="boot-buttons">
+        <button id="btn-continue" class="btn btn-primary hidden">Continue</button>
+        <button id="btn-newgame" class="btn btn-primary">New Adventure</button>
+      </div>
+      <div id="boot-status" class="boot-status">offline ready</div>
+    </div>
+  </div>
+
+  <!-- Character creation -->
+  <div id="create-screen" class="screen hidden">
+    <div class="create-wrap">
+      <h2>Create Your Hero</h2>
+      <div class="create-field">
+        <label for="hero-name">Name</label>
+        <input id="hero-name" maxlength="16" placeholder="Adventurer" autocomplete="off">
+      </div>
+      <div class="create-section">
+        <h3>Species</h3>
+        <div id="species-list" class="pick-grid"></div>
+        <div id="subspecies-list" class="pick-grid small"></div>
+      </div>
+      <div class="create-section">
+        <h3>Class</h3>
+        <div id="class-list" class="pick-grid"></div>
+      </div>
+      <div id="create-summary" class="create-summary"></div>
+      <div class="create-actions">
+        <button id="btn-create-back" class="btn">Back</button>
+        <button id="btn-create-go" class="btn btn-primary">Enter the Crypt</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-game HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div id="hud-portrait"></div>
+      <div id="hud-bars">
+        <div class="bar hp"><div id="bar-hp" class="bar-fill"></div><span id="txt-hp"></span></div>
+        <div class="bar mp"><div id="bar-mp" class="bar-fill"></div><span id="txt-mp"></span></div>
+        <div class="bar xp"><div id="bar-xp" class="bar-fill"></div><span id="txt-xp"></span></div>
+      </div>
+      <div id="hud-info">
+        <div id="hud-floor"></div>
+        <div id="hud-gold"></div>
+        <div id="hud-hunger"></div>
+      </div>
+      <div id="hud-net" class="net-off" title="connection">●</div>
+    </div>
+    <div id="hud-effects"></div>
+    <div id="hud-msg"></div>
+    <div id="joystick"><div id="joystick-knob"></div></div>
+    <div id="action-buttons">
+      <button class="act-btn" id="act-attack" title="Attack">⚔</button>
+      <button class="act-btn skill" id="act-skill1">1</button>
+      <button class="act-btn skill" id="act-skill2">2</button>
+      <button class="act-btn skill" id="act-skill3">3</button>
+      <button class="act-btn skill" id="act-skill4">4</button>
+      <button class="act-btn" id="act-interact" title="Interact">✦</button>
+    </div>
+    <nav id="mode-nav">
+      <button data-mode="crypt" class="nav-btn active">🗡<span>Crypt</span></button>
+      <button data-mode="haven" class="nav-btn">🏰<span>Haven</span></button>
+      <button data-mode="farm" class="nav-btn">🌾<span>Farm</span></button>
+      <button data-mode="arena" class="nav-btn">💥<span>Arena</span></button>
+      <button data-mode="menu" class="nav-btn">☰<span>Menu</span></button>
+    </nav>
+    <button id="btn-chat-toggle" title="Chat">💬</button>
+  </div>
+
+  <!-- Sliding panel host (inventory, character, quests, etc.) -->
+  <div id="panel-host" class="hidden">
+    <div id="panel-card">
+      <div id="panel-head">
+        <div id="panel-tabs"></div>
+        <button id="panel-close">✕</button>
+      </div>
+      <div id="panel-body"></div>
+    </div>
+  </div>
+
+  <!-- Chat drawer -->
+  <div id="chat-drawer" class="hidden">
+    <div id="chat-log"></div>
+    <div id="chat-input-row">
+      <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
+      <button id="chat-send" class="btn">➤</button>
+    </div>
+  </div>
+
+  <!-- Modal dialogs -->
+  <div id="modal-host" class="hidden">
+    <div id="modal-card"></div>
+  </div>
+
+  <div id="toast-host"></div>
+
+  <!-- Game data (generated from the original Rust game) -->
+  <script src="js/data/data_classes.js"></script>
+  <script src="js/data/data_species.js"></script>
+  <script src="js/data/data_enemies.js"></script>
+  <script src="js/data/data_items.js"></script>
+  <script src="js/data/data_quests.js"></script>
+  <script src="js/data/data_social.js"></script>
+  <script src="js/data/data_companions.js"></script>
+  <script src="js/data/data_crafting.js"></script>
+  <script src="js/data/data_world.js"></script>
+  <script src="js/data/data_mmo.js"></script>
+  <!-- Engine -->
+  <script src="js/util.js"></script>
+  <script src="js/worldgen.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/combat.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/systems.js"></script>
+  <script src="js/haven.js"></script>
+  <script src="js/arena.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
