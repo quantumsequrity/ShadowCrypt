@@ -298,7 +298,9 @@ SC.worldgen = (function () {
           path.reverse();
           return path;
         }
-        if (!map.isWalkable(nx, ny)) continue;
+        // closed doors and boss gates are traversable for planning — walkers open them on contact
+        var nt = map.get(nx, ny);
+        if (!map.isWalkable(nx, ny) && nt !== T.DOOR_CLOSED && nt !== T.BOSS_GATE) continue;
         if (extraBlock && extraBlock(nx, ny)) continue;
         came[key] = cur;
         open.push([nx, ny]);

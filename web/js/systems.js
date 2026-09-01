@@ -115,10 +115,12 @@ SC.systems = (function () {
     if (c.harvested && s.cropsHarvested < c.harvested) return false;
     if (c.pvpWins && s.pvpWins < c.pvpWins) return false;
     if (c.chests && s.chestsOpened < c.chests) return false;
-    // if condition uses keys we don't track, require at least one tracked key to have matched
-    var tracked = ['kills', 'bossKills', 'level', 'floor', 'gold', 'quests', 'crafted', 'harvested', 'pvpWins', 'chests'];
-    var any = Object.keys(c).some(function (k) { return tracked.indexOf(k) >= 0; });
-    return any;
+    if (c.deaths && s.deaths < c.deaths) return false;
+    if (c.closeCalls && (s.closeCalls || 0) < c.closeCalls) return false;
+    // every condition key must be one we track (and have a real threshold) — unknown keys never auto-unlock
+    var tracked = ['kills', 'bossKills', 'level', 'floor', 'gold', 'quests', 'crafted', 'harvested', 'pvpWins', 'chests', 'deaths', 'closeCalls'];
+    var keys = Object.keys(c);
+    return keys.length > 0 && keys.every(function (k) { return tracked.indexOf(k) >= 0 && c[k] > 0; });
   }
 
   // ---- Factions -----------------------------------------------------------

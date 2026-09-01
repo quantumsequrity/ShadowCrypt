@@ -67,7 +67,7 @@ SC.entities = (function () {
       achievements: [],
       factionRep: {},
       knownRecipes: [],
-      stats: { kills: 0, bossKills: 0, deaths: 0, deepestFloor: 1, cropsHarvested: 0, itemsCrafted: 0, pvpWins: 0, questsDone: 0, chestsOpened: 0 },
+      stats: { kills: 0, bossKills: 0, deaths: 0, closeCalls: 0, deepestFloor: 1, cropsHarvested: 0, itemsCrafted: 0, pvpWins: 0, questsDone: 0, chestsOpened: 0 },
       createdAt: Date.now()
     };
     var eff = effective(p);

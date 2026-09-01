@@ -1,0 +1,14 @@
+{
+  "name": "shadowcrypt-server",
+  "version": "1.0.0",
+  "description": "ShadowCrypt Online multiplayer server: static hosting, chat, presence, arena PvP relay, cloud saves",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=16" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
