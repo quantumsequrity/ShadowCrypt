@@ -1,8 +1,13 @@
 # ShadowCrypt
 
-**A Terminal Roguelike Dungeon Crawler**
+**A Terminal Roguelike Dungeon Crawler — now also a cross-platform action MMORPG**
 
 Descend into the depths of ShadowCrypt, a classic roguelike adventure where death is permanent and every decision matters. Battle through 30 floors of procedurally generated dungeons, face terrifying bosses, and uncover legendary artifacts as you fight your way to defeat the Demon King.
+
+> ## 🌐 NEW: ShadowCrypt Online
+> The full game has been converted into a **web MMORPG** playable on **mobile, tablet and PC** — **offline** (installable PWA) and **online** (chat, co-op presence, real-time PvP arena, cloud saves). It adds Haven base-building, real-time farming, companions, crafting, quests, factions and achievements on top of everything below.
+>
+> **→ See [PLAY_ONLINE.md](PLAY_ONLINE.md)** · Client: `web/` · Server: `server/` (`cd server && npm install && npm start`)
 
 ---
 

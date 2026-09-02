@@ -1,0 +1,7 @@
+"Press Start 2P" font (PressStart2P.woff2)
+Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net),
+with Reserved Font Name "Press Start 2P".
+
+Licensed under the SIL Open Font License, Version 1.1.
+Full license text: https://openfontlicense.org
+Source: https://fonts.google.com/specimen/Press+Start+2P
