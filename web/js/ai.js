@@ -19,6 +19,22 @@ SC.ai = (function () {
     var d = U.dist(m.x, m.y, p.x, p.y);
     var sight = m.boss ? 14 : 9;
 
+    // ---- boss mechanics: enrage phase + telegraphed abilities ----
+    if (m.boss) {
+      if (!m.enraged && m.hp <= m.maxHp * 0.5) {
+        m.enraged = true;
+        m.atk = Math.round(m.atk * 1.25);
+        m.spd += 3;
+        if (ctx.onBossEnrage) ctx.onBossEnrage(m);
+      }
+      m.abilityCd = (m.abilityCd === undefined ? 3500 : m.abilityCd) - dtMs;
+      if (m.aiState === 'chase' && m.abilityCd <= 0 && ctx.bossAbility) {
+        m.abilityCd = m.enraged ? 4200 : 6500;
+        ctx.bossAbility(m);
+        return;
+      }
+    }
+
     // acquire target
     if (!invisible && d <= sight && hasLos(ctx.map, m.x, m.y, p.x, p.y)) {
       m.aiState = 'chase';

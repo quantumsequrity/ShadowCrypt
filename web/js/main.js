@@ -142,7 +142,8 @@ var SC = (typeof window !== 'undefined') ? (window.SC = window.SC || {}) : (glob
     $('boot-screen').classList.add('hidden');
     $('create-screen').classList.add('hidden');
     $('hud').classList.remove('hidden');
-    SC.ui.updateHud();
+    SC.ui.updateHud(true);
+    SC.audio.setMood(SC.game.state.mode === 'crypt' ? 'crypt' : SC.game.state.mode);
     if (SC.net) SC.net.connect(SC.game.state.player.name);
   }
 
@@ -156,6 +157,7 @@ var SC = (typeof window !== 'undefined') ? (window.SC = window.SC || {}) : (glob
 
   function init() {
     SC.render.init($('game-canvas'));
+    SC.audio.init();
     SC.input.init();
     SC.game.init();
     SC.ui.init();

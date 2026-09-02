@@ -9,6 +9,9 @@ SC.input = (function () {
   var joy = { active: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 };
   var tapTarget = null; // {x,y} world tile tapped (crypt tap-to-move)
   var attackHeld = false;
+  var lookAccum = 0;                 // radians of camera turn accumulated since last consume
+  var lookTouch = { id: null, lastX: 0 };
+  var mouseLook = { down: false, lastX: 0, moved: 0 };
 
   function init() {
     if (typeof window === 'undefined') return;
@@ -24,7 +27,10 @@ SC.input = (function () {
       if (k === 'm') U.emit('ui:panel', 'map');
       if (k === '?') U.emit('ui:panel', 'help');
       if (k === 'escape') U.emit('ui:escape');
-      if (k === 'g' || k === 'e') U.emit('action:interact');
+      if (k === 'g') U.emit('action:interact');
+      if (k === 'f') U.emit('action:interact');
+      if (k === 'shift') U.emit('action:dash');
+      if (k === 'v') U.emit('action:camera');
       if (k === ' ') { e.preventDefault(); U.emit('action:attack'); }
       if (k === 'enter') U.emit('ui:chat-focus');
       if (k >= '1' && k <= '4') U.emit('action:skill', parseInt(k, 10) - 1);
@@ -45,7 +51,66 @@ SC.input = (function () {
     initJoystick();
     initButtons();
     initCanvasTaps();
+    initLook();
   }
+
+  // Camera look: touch-drag on the right 55% of the screen, or mouse drag, turns the view (TPP/FPP)
+  function initLook() {
+    var canvas = document.getElementById('game-canvas');
+    if (!canvas) return;
+    var SENS = 0.0075;
+    canvas.addEventListener('touchstart', function (e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        if (t.identifier === joy.id) continue;
+        if (t.clientX > window.innerWidth * 0.45 && lookTouch.id === null) {
+          lookTouch.id = t.identifier;
+          lookTouch.lastX = t.clientX;
+        }
+      }
+    }, { passive: true });
+    window.addEventListener('touchmove', function (e) {
+      if (lookTouch.id === null) return;
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        if (t.identifier === lookTouch.id) {
+          lookAccum += (t.clientX - lookTouch.lastX) * SENS;
+          lookTouch.lastX = t.clientX;
+        }
+      }
+    }, { passive: true });
+    function endLook(e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === lookTouch.id) lookTouch.id = null;
+      }
+    }
+    window.addEventListener('touchend', endLook);
+    window.addEventListener('touchcancel', endLook);
+    // mouse drag look
+    canvas.addEventListener('mousedown', function (e) {
+      mouseLook.down = true; mouseLook.lastX = e.clientX; mouseLook.moved = 0;
+    });
+    window.addEventListener('mousemove', function (e) {
+      if (!mouseLook.down) return;
+      var dx = e.clientX - mouseLook.lastX;
+      mouseLook.moved += Math.abs(dx);
+      lookAccum += dx * SENS;
+      mouseLook.lastX = e.clientX;
+    });
+    window.addEventListener('mouseup', function () { mouseLook.down = false; });
+  }
+
+  function consumeLook() {
+    var v = lookAccum;
+    lookAccum = 0;
+    // keyboard turn keys
+    if (keys['q']) v -= 0.045;
+    if (keys['e']) v += 0.045;
+    return v;
+  }
+
+  // did the last mouse interaction turn the camera (suppress tap-to-move)?
+  function wasDragging() { return mouseLook.moved > 8; }
 
   function initJoystick() {
     var el = document.getElementById('joystick');
@@ -105,6 +170,8 @@ SC.input = (function () {
     }
     bindHold('act-attack', function () { attackHeld = true; U.emit('action:attack'); }, function () { attackHeld = false; });
     bindHold('act-interact', function () { U.emit('action:interact'); });
+    bindHold('act-dash', function () { U.emit('action:dash'); });
+    bindHold('btn-camera', function () { U.emit('action:camera'); });
     for (var i = 1; i <= 4; i++) {
       (function (n) {
         bindHold('act-skill' + n, function () { U.emit('action:skill', n - 1); });
@@ -133,8 +200,6 @@ SC.input = (function () {
     if (keys['s'] || keys['arrowdown']) my += 1;
     if (keys['a'] || keys['arrowleft']) mx -= 1;
     if (keys['d'] || keys['arrowright']) mx += 1;
-    if (keys['q']) { mx -= 1; my -= 1; }
-    if (keys['e'] && (keys['q'] || false)) { /* e reserved for interact on kb */ }
     if (keys['z']) { mx -= 1; my += 1; }
     if (keys['c']) { mx += 1; my += 1; }
     var len = Math.sqrt(mx * mx + my * my);
@@ -154,6 +219,8 @@ SC.input = (function () {
   return {
     init: init,
     moveVector: moveVector,
+    consumeLook: consumeLook,
+    wasDragging: wasDragging,
     setTapTarget: setTapTarget, getTapTarget: getTapTarget, clearTapTarget: clearTapTarget,
     isAttackHeld: isAttackHeld,
     isKey: isKey,

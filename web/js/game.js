@@ -10,7 +10,8 @@ SC.game = (function () {
 
   var st = {
     started: false,
-    mode: 'crypt',            // crypt | haven | farm | arena
+    mode: 'crypt',            // crypt | haven | farm | arena | siege
+    camera: 'top',            // top | tpp | fpp  (crypt view modes)
     player: null,
     haven: null,
     map: null,
@@ -19,8 +20,11 @@ SC.game = (function () {
     allies: [],               // companions + summons (crypt instances)
     groundItems: [],          // {x,y,id?,qty,rarity} or {x,y,gold}
     projectiles: [],
+    telegraphs: [],           // boss ability warnings {x,y,radius,at,duration,color,resolve}
+    siege: null,
     moveCd: 0,
     atkCd: 0,
+    dashCd: 0,
     path: null,               // tap-to-move path
     runSeed: 0,
     buildPlacing: null,       // {type,x,y} while placing a building
@@ -124,9 +128,18 @@ SC.game = (function () {
     p.stats.deepestFloor = Math.max(p.stats.deepestFloor, floor);
     SC.systems.questProgress(p, 'explore', floor, 1);
     SC.systems.checkAchievements(p);
+    st.telegraphs = [];
     var theme = st.map.theme || {};
     U.emit('floor:entered', { floor: floor, theme: theme.name });
     U.emit('msg', '— Floor ' + floor + ': ' + (theme.name || 'Unknown depths') + ' —');
+    U.emit('sfx', 'stairs');
+    if (st.map.bossSpawn) {
+      U.emit('sfx', 'boss');
+      U.emit('music', 'boss');
+      U.emit('toast', { text: '☠ BOSS FLOOR — steel yourself!', cls: 'bad' });
+    } else {
+      U.emit('music', 'crypt');
+    }
   }
 
   function populateFloor(map, floor) {
@@ -176,9 +189,13 @@ SC.game = (function () {
     if (st.started) {
       if (st.mode === 'crypt') {
         tickCrypt(dt);
-        SC.render.renderCrypt(st, dt);
+        if (st.camera !== 'top' && SC.view3d) SC.view3d.render(st, dt);
+        else SC.render.renderCrypt(st, dt);
       } else if (st.mode === 'haven' || st.mode === 'farm') {
         SC.render.renderHaven(st, dt, st.mode === 'farm');
+      } else if (st.mode === 'siege' && SC.siege) {
+        SC.siege.tick(st, dt);
+        SC.render.renderSiege(st, dt);
       } else if (st.mode === 'arena') {
         var input = SC.input.moveVector();
         SC.arena.tick(dt, { mx: input.x, my: input.y, fire: SC.input.isAttackHeld(), bomb: false });
@@ -197,21 +214,47 @@ SC.game = (function () {
     var p = st.player;
     if (!p || p.hp <= 0) return;
 
-    st.moveCd -= dt; st.atkCd -= dt;
+    st.moveCd -= dt; st.atkCd -= dt; st.dashCd -= dt;
+    if (p.ang === undefined) p.ang = Math.atan2(p.dirY || 1, p.dirX || 0);
 
-    // movement
+    // look input turns the camera in TPP/FPP (PUBG-style)
+    if (st.camera !== 'top') {
+      var look = SC.input.consumeLook();
+      p.ang += look;
+      p.dirX = Math.abs(Math.cos(p.ang)) > 0.38 ? Math.sign(Math.cos(p.ang)) : 0;
+      p.dirY = Math.abs(Math.sin(p.ang)) > 0.38 ? Math.sign(Math.sin(p.ang)) : 0;
+      if (!p.dirX && !p.dirY) p.dirY = Math.sign(Math.sin(p.ang)) || 1;
+    }
+
+    // movement (camera-relative in TPP/FPP: joystick-up = forward)
     var mv = SC.input.moveVector();
+    if (st.camera !== 'top' && (mv.x || mv.y)) {
+      var fwd = -mv.y, strafe = mv.x;
+      var ca = Math.cos(p.ang), sa = Math.sin(p.ang);
+      // forward = (ca,sa), right = (-sa,ca)
+      mv = { x: fwd * ca - strafe * sa, y: fwd * sa + strafe * ca };
+    }
     if ((mv.x || mv.y) && st.moveCd <= 0) {
       st.path = null;
       var dx = Math.abs(mv.x) > 0.35 ? Math.sign(mv.x) : 0;
       var dy = Math.abs(mv.y) > 0.35 ? Math.sign(mv.y) : 0;
-      if (dx || dy) tryMove(dx, dy);
+      if (dx || dy) tryMove(dx, dy, st.camera !== 'top');
     } else if (st.path && st.path.length && st.moveCd <= 0) {
       var next = st.path[0];
       var pdx = Math.sign(next.x - p.x), pdy = Math.sign(next.y - p.y);
       if (tryMove(pdx, pdy)) {
         if (p.x === next.x && p.y === next.y) st.path.shift();
       } else st.path = null;
+    }
+
+    // telegraphed boss abilities resolve
+    var nowT = Date.now();
+    for (var tgi = st.telegraphs.length - 1; tgi >= 0; tgi--) {
+      var tel = st.telegraphs[tgi];
+      if (nowT >= tel.at + tel.duration) {
+        st.telegraphs.splice(tgi, 1);
+        if (tel.resolve) tel.resolve();
+      }
     }
 
     // held attack auto-swings
@@ -300,15 +343,29 @@ SC.game = (function () {
         return false;
       },
       monsterAttackPlayer: function (m) {
+        if (E.hasEffect(st.player, 'dodging')) {
+          SC.render.floatText(st.player.x, st.player.y, 'DODGE', '#9fd8ff');
+          return;
+        }
         var res = C.monsterAttack(m, st.player);
         SC.render.floatText(st.player.x, st.player.y, '-' + res.dmg, '#ff6b6b');
         SC.render.burst(st.player.x, st.player.y, '#e74c3c', 5);
+        SC.render.shake(m.boss ? 7 : 3);
+        U.emit('sfx', 'hurt');
         // boss specials
         if (m.boss && Math.random() < 0.25) {
           var fx = ['burning', 'frozen', 'weakened', 'poisoned'][Math.floor(Math.random() * 4)];
           E.addEffect(st.player, fx, 4);
           U.emit('msg', m.name + ' afflicts you with ' + fx + '!');
         }
+      },
+      onBossEnrage: function (m) {
+        U.emit('msg', '🔥 ' + m.name + ' ENRAGES!');
+        U.emit('sfx', 'boss');
+        SC.render.shake(10);
+      },
+      bossAbility: function (m) {
+        bossAbility(m);
       },
       monsterAttackAlly: function (m, al) {
         var dmg = C.computeDamage(m.atk, al.def, 1);
@@ -326,6 +383,86 @@ SC.game = (function () {
       onMonsterKilled: onMonsterKilled,
       spawnFloatText: function (x, y, txt, color) { SC.render.floatText(x, y, txt, color); }
     };
+  }
+
+  // ---- boss abilities: telegraphed, themed by floor element ---------------
+  function addTelegraph(x, y, radius, duration, color, resolve) {
+    st.telegraphs.push({ x: x, y: y, radius: radius, at: Date.now(), duration: duration, color: color, resolve: resolve });
+    U.emit('sfx', 'telegraph');
+  }
+
+  function bossAbility(m) {
+    var p = st.player;
+    var theme = (st.map.theme && st.map.theme.id) || 'dungeon';
+    var elemColor = /volcan|demon/.test(theme) ? 'rgba(255,90,40,0.9)' :
+                    (/frozen/.test(theme) ? 'rgba(110,200,255,0.9)' : 'rgba(190,90,255,0.9)');
+    var elemEffect = /volcan|demon/.test(theme) ? 'burning' : (/frozen/.test(theme) ? 'frozen' : 'weakened');
+    var roll = Math.random();
+    if (roll < 0.4) {
+      // SLAM: telegraphed blast at the player's current position
+      var tx = p.x, ty = p.y;
+      U.emit('msg', '⚠ ' + m.name + ' rears back…');
+      addTelegraph(tx, ty, 2.4, 1300, elemColor, function () {
+        SC.render.shake(10);
+        U.emit('sfx', 'explosion');
+        SC.render.burst(tx, ty, '#ff8040', 22);
+        if (U.dist(p.x, p.y, tx, ty) <= 2.4 && !E.hasEffect(p, 'dodging')) {
+          var eff = E.effective(p);
+          var dmg = Math.max(4, Math.round(m.atk * 1.6 - eff.def * 0.5));
+          p.hp -= dmg;
+          E.addEffect(p, elemEffect, 4);
+          SC.render.floatText(p.x, p.y, '-' + dmg, '#ff6040');
+          if (p.hp <= 0) die();
+        }
+      });
+    } else if (roll < 0.65) {
+      // NOVA: ring around the boss
+      var bx = m.x, by = m.y;
+      U.emit('msg', '⚠ Power gathers around ' + m.name + '!');
+      addTelegraph(bx, by, 3.2, 1500, elemColor, function () {
+        if (m.hp <= 0) return;
+        SC.render.shake(8);
+        U.emit('sfx', 'explosion');
+        SC.render.burst(bx, by, elemColor, 26);
+        if (U.dist(p.x, p.y, bx, by) <= 3.2 && !E.hasEffect(p, 'dodging')) {
+          var eff2 = E.effective(p);
+          var dmg2 = Math.max(3, Math.round(m.atk * 1.3 - eff2.def * 0.5));
+          p.hp -= dmg2;
+          SC.render.floatText(p.x, p.y, '-' + dmg2, '#ff6040');
+          if (p.hp <= 0) die();
+        }
+      });
+    } else if (roll < 0.85) {
+      // SUMMON adds
+      U.emit('msg', m.name + ' calls for aid!');
+      U.emit('sfx', 'skill_dark');
+      var tier = Math.min(8, Math.ceil(p.floor / 4));
+      var pool = E.enemyPool(tier);
+      for (var s2 = 0; s2 < 2 && pool.length; s2++) {
+        var pos = null;
+        for (var tr = 0; tr < 12; tr++) {
+          var cx = m.x + U.DIRS8[tr % 8][0] * (1 + (tr / 8 | 0)), cy = m.y + U.DIRS8[tr % 8][1];
+          if (st.map.isWalkable(cx, cy) && !monsterAt(cx, cy)) { pos = { x: cx, y: cy }; break; }
+        }
+        if (pos) {
+          var add = E.spawnMonster(pool[Math.floor(Math.random() * pool.length)], pos.x, pos.y, p.floor, { eliteChance: 0 });
+          add.aiState = 'chase';
+          st.monsters.push(add);
+          SC.render.burst(pos.x, pos.y, '#b06ae0', 10);
+        }
+      }
+    } else {
+      // VOLLEY: ring of projectiles
+      U.emit('sfx', 'shoot');
+      for (var a = 0; a < 8; a++) {
+        var ang = a * Math.PI / 4;
+        st.projectiles.push({
+          x: m.x + 0.5, y: m.y + 0.5,
+          vx: Math.cos(ang) * 6, vy: Math.sin(ang) * 6,
+          ttl: 1800, from: 'monster', dmg: Math.round(m.atk * 0.8), color: elemColor
+        });
+      }
+    }
   }
 
   function tickProjectiles(dt) {
@@ -350,10 +487,16 @@ SC.game = (function () {
         }
       } else if (!dead && pr.from === 'monster') {
         if (U.dist(pr.x - 0.5, pr.y - 0.5, p.x, p.y) < 0.6) {
-          var eff2 = E.effective(p);
-          var dmg2 = Math.max(1, Math.round(pr.dmg * (0.85 + Math.random() * 0.3) - eff2.def));
-          p.hp -= dmg2;
-          SC.render.floatText(p.x, p.y, '-' + dmg2, '#ff6b6b');
+          if (E.hasEffect(p, 'dodging')) {
+            SC.render.floatText(p.x, p.y, 'DODGE', '#9fd8ff');
+          } else {
+            var eff2 = E.effective(p);
+            var dmg2 = Math.max(1, Math.round(pr.dmg * (0.85 + Math.random() * 0.3) - eff2.def));
+            p.hp -= dmg2;
+            SC.render.floatText(p.x, p.y, '-' + dmg2, '#ff6b6b');
+            SC.render.shake(2);
+            U.emit('sfx', 'hurt');
+          }
           dead = true;
         }
       }
@@ -365,7 +508,53 @@ SC.game = (function () {
   }
 
   // ------------------------------------------------------------- movement
-  function tryMove(dx, dy) {
+  function breakableAt(x, y) {
+    var list = st.map.breakables || [];
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i].broken && list[i].x === x && list[i].y === y) return list[i];
+    }
+    return null;
+  }
+
+  function smashBreakable(br) {
+    var p = st.player;
+    if (br.kind === 'goldenChest') {
+      if (E.countItem(p, 'key') > 0) {
+        E.removeItem(p, 'key', 1);
+        br.broken = true;
+        var rngG = new U.Rng(U.hashStr('golden:' + p.floor + ':' + br.x + ':' + br.y));
+        for (var gi = 0; gi < 3; gi++) {
+          var rar = rngG.chance(0.5) ? 'epic' : (rngG.chance(0.6) ? 'legendary' : 'mythic');
+          var pool = Object.keys(SC.DATA.items).filter(function (id) {
+            return ['weapon', 'shield', 'armor', 'helmet', 'gloves', 'boots', 'ring', 'amulet'].indexOf(SC.DATA.items[id].kind) >= 0;
+          });
+          st.groundItems.push({ x: br.x, y: br.y, id: rngG.pick(pool), qty: 1, rarity: rar, affixes: C.rollAffixes(rngG, rar) });
+        }
+        st.groundItems.push({ x: br.x, y: br.y, gold: rngG.int(100, 250) });
+        SC.render.burst(br.x, br.y, '#ffd75e', 20);
+        U.emit('sfx', 'chest');
+        U.emit('toast', { text: '🔑 The golden chest opens!', cls: 'gold' });
+      } else {
+        U.emit('msg', '🔒 A golden chest — it needs a Key (mini-bosses carry them).');
+        U.emit('sfx', 'error');
+      }
+      return;
+    }
+    br.broken = true;
+    var rng = new U.Rng(U.hashStr('brk:' + p.floor + ':' + br.x + ':' + br.y));
+    SC.render.burst(br.x, br.y, br.kind === 'urn' ? '#a8845c' : '#8a6a40', 12);
+    SC.render.shake(3);
+    U.emit('sfx', 'hit');
+    if (rng.chance(0.6)) st.groundItems.push({ x: br.x, y: br.y, gold: rng.int(2, 10 + p.floor) });
+    if (rng.chance(0.22)) {
+      var drops = C.rollLoot(rng, p.floor, 1);
+      drops.forEach(function (d) {
+        if (!d.gold) st.groundItems.push({ x: br.x, y: br.y, id: d.id, qty: d.qty, rarity: d.rarity, affixes: d.affixes });
+      });
+    }
+  }
+
+  function tryMove(dx, dy, keepFacing) {
     var p = st.player;
     if (E.hasEffect(p, 'frozen') || E.hasEffect(p, 'stunned')) return false;
     if (E.hasEffect(p, 'confused') && Math.random() < 0.4) {
@@ -373,16 +562,24 @@ SC.game = (function () {
       dx = rd[0]; dy = rd[1];
     }
     var nx = p.x + dx, ny = p.y + dy;
-    p.dirX = dx; p.dirY = dy;
+    if (!keepFacing) {
+      p.dirX = dx; p.dirY = dy;
+      p.ang = Math.atan2(dy, dx);
+    }
 
     // bump attack
     var m = monsterAt(nx, ny);
     if (m) { doAttack(m); return false; }
 
+    // smash breakables by walking into them
+    var br = breakableAt(nx, ny);
+    if (br) { smashBreakable(br); st.moveCd = MOVE_MS; return false; }
+
     var tile = st.map.get(nx, ny);
     if (tile === SC.TILE.DOOR_CLOSED) {
       st.map.set(nx, ny, SC.TILE.DOOR_OPEN);
       U.emit('msg', 'You open the door.');
+      U.emit('sfx', 'door');
       st.moveCd = MOVE_MS;
       afterMoveFov();
       return true;
@@ -422,52 +619,109 @@ SC.game = (function () {
   }
 
   // ------------------------------------------------------------- actions
+  function doDash() {
+    var p = st.player;
+    if (st.mode !== 'crypt' || st.dashCd > 0 || p.hp <= 0) return;
+    var dx = p.dirX, dy = p.dirY;
+    if (!dx && !dy) { dy = 1; }
+    var steps = 0;
+    for (var i = 0; i < 3; i++) {
+      var nx = p.x + dx, ny = p.y + dy;
+      if (!st.map.isWalkable(nx, ny) || monsterAt(nx, ny) || breakableAt(nx, ny)) break;
+      p.x = nx; p.y = ny;
+      steps++;
+      SC.render.burst(p.x, p.y, '#9fd8ff', 3);
+    }
+    if (!steps) return;
+    st.dashCd = 1800;
+    p.dashUntil = Date.now() + 260;
+    E.addEffect(p, 'dodging', 0.35);
+    U.emit('sfx', 'dash');
+    st.moveCd = 120;
+    afterMoveFov();
+    pickupHere();
+  }
+
+  // Melee swings hit every monster in a 120° arc; ranged classes fire projectiles.
   function doAttack(targetMonster) {
     if (st.atkCd > 0) return;
     var p = st.player;
     var eff = E.effective(p);
     st.atkCd = U.clamp(900 - eff.spd * 22, 260, 900);
+    p.swingUntil = Date.now() + 170;
 
     var isRangedClass = ['ranger', 'mage', 'necromancer'].indexOf(p.classId) >= 0;
     var weapon = p.equipment.weapon && E.itemDef(p.equipment.weapon.id);
     var ranged = (weapon && weapon.ranged) || (!weapon && isRangedClass);
 
-    var m = targetMonster;
-    if (!m) {
-      // nearest visible monster
-      var best = null, bd = 1e9;
-      for (var i = 0; i < st.monsters.length; i++) {
-        var mm = st.monsters[i];
-        if (mm.hp <= 0) continue;
-        if (!st.map.visible[mm.x + ',' + mm.y]) continue;
-        var dd = U.dist(mm.x, mm.y, p.x, p.y);
-        if (dd < bd) { bd = dd; best = mm; }
+    if (ranged) {
+      var m = targetMonster;
+      if (!m) {
+        var best = null, bd = 1e9;
+        for (var i = 0; i < st.monsters.length; i++) {
+          var mm = st.monsters[i];
+          if (mm.hp <= 0 || !st.map.visible[mm.x + ',' + mm.y]) continue;
+          var dd = U.dist(mm.x, mm.y, p.x, p.y);
+          if (dd < bd) { bd = dd; best = mm; }
+        }
+        m = bd <= 8 ? best : null;
       }
-      m = best;
-      if (m && !ranged && bd > 1.6) m = null;
-      if (m && ranged && bd > 8) m = null;
-    }
-    if (!m) {
-      SC.render.burst(p.x + p.dirX * 0.5, p.y + p.dirY * 0.5, '#8ea2c9', 3);
-      return;
+      U.emit('sfx', p.classId === 'mage' ? 'shoot' : 'bow');
+      if (m && U.cheb(p.x, p.y, m.x, m.y) > 1) {
+        var dx = m.x - p.x, dy = m.y - p.y;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        st.projectiles.push({
+          x: p.x + 0.5, y: p.y + 0.5, vx: dx / len * 10, vy: dy / len * 10,
+          ttl: 1200, from: 'player', color: p.classId === 'mage' ? '#7ec8ff' : '#e8d9a0'
+        });
+        return;
+      }
+      if (!m) {
+        // fire toward facing anyway (feels responsive in FPP)
+        var fa = p.ang !== undefined ? p.ang : Math.atan2(p.dirY, p.dirX);
+        st.projectiles.push({
+          x: p.x + 0.5, y: p.y + 0.5, vx: Math.cos(fa) * 10, vy: Math.sin(fa) * 10,
+          ttl: 1200, from: 'player', color: p.classId === 'mage' ? '#7ec8ff' : '#e8d9a0'
+        });
+        return;
+      }
     }
 
-    if (ranged && U.cheb(p.x, p.y, m.x, m.y) > 1) {
-      var dx = m.x - p.x, dy = m.y - p.y;
-      var len = Math.sqrt(dx * dx + dy * dy) || 1;
-      st.projectiles.push({
-        x: p.x + 0.5, y: p.y + 0.5, vx: dx / len * 10, vy: dy / len * 10,
-        ttl: 1200, from: 'player', color: p.classId === 'mage' ? '#7ec8ff' : '#e8d9a0'
-      });
+    // melee: arc sweep
+    var faceAng = p.ang !== undefined ? p.ang : Math.atan2(p.dirY || 1, p.dirX || 0);
+    var hits = [];
+    if (targetMonster && targetMonster.hp > 0) hits.push(targetMonster);
+    for (var j = 0; j < st.monsters.length; j++) {
+      var mo = st.monsters[j];
+      if (mo.hp <= 0 || mo === targetMonster) continue;
+      var d2 = U.dist(mo.x, mo.y, p.x, p.y);
+      if (d2 > 1.75) continue;
+      var angTo = Math.atan2(mo.y - p.y, mo.x - p.x);
+      var diff = Math.abs(((angTo - faceAng) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+      if (diff <= 1.15 || d2 <= 1.0) hits.push(mo);
+    }
+    U.emit('sfx', 'swing');
+    if (!hits.length) {
+      SC.render.burst(p.x + Math.cos(faceAng) * 0.6, p.y + Math.sin(faceAng) * 0.6, '#8ea2c9', 3);
       return;
     }
-
-    // behind check for rogue: attacking in the monster's rear半
-    var behind = (m.x - p.x) * p.dirX + (m.y - p.y) * p.dirY > 0 && Math.random() < 0.4;
-    var res = C.playerAttack(p, m, { behind: behind });
-    SC.render.floatText(m.x, m.y, '-' + res.dmg + (res.crit ? '!' : ''), res.crit ? '#ffec6b' : '#ffd35c');
-    SC.render.burst(m.x, m.y, m.color, 4);
-    if (res.killed) onMonsterKilled(m, false);
+    var anyCrit = false;
+    for (var h = 0; h < hits.length; h++) {
+      var tgt = hits[h];
+      var behind = (tgt.x - p.x) * p.dirX + (tgt.y - p.y) * p.dirY > 0 && Math.random() < 0.4;
+      var res = C.playerAttack(p, tgt, { behind: behind });
+      SC.render.floatText(tgt.x, tgt.y, '-' + res.dmg + (res.crit ? '!' : ''), res.crit ? '#ffec6b' : '#ffd35c');
+      SC.render.burst(tgt.x, tgt.y, tgt.color, 4);
+      if (res.crit) {
+        anyCrit = true;
+        // knockback one tile away from the player
+        var kx = tgt.x + Math.sign(tgt.x - p.x), ky = tgt.y + Math.sign(tgt.y - p.y);
+        if (st.map.isWalkable(kx, ky) && !monsterAt(kx, ky)) { tgt.x = kx; tgt.y = ky; }
+      }
+      if (res.killed) onMonsterKilled(tgt, false);
+    }
+    U.emit('sfx', anyCrit ? 'crit' : 'hit');
+    if (anyCrit) SC.render.shake(4);
   }
 
   function onMonsterKilled(m, byAlly) {
@@ -481,13 +735,16 @@ SC.game = (function () {
     SC.render.floatText(m.x, m.y, '+' + Math.round(m.xp * xpMult) + 'xp', '#c88ae8');
     SC.render.burst(m.x, m.y, m.color, 10);
 
+    U.emit('sfx', m.boss ? 'death' : 'kill');
     var rng = new U.Rng((Date.now() & 0xffffff) ^ U.hashStr(m.mid));
-    var luck = (st.blessedRun === 'bl_luck' ? 4 : 0) + (E.hasEffect(p, 'lucky') ? 3 : 0);
+    var luck = (st.blessedRun === 'bl_luck' ? 4 : 0) + (E.hasEffect(p, 'lucky') ? 3 : 0) + (m.affix ? 3 : 0);
     var drops = C.rollLoot(rng, p.floor, luck);
+    if (m.affix && !rng.chance(0.4)) drops = drops.concat(C.rollLoot(rng, p.floor, luck)); // elites drop extra
     if (m.boss || m.miniBoss) drops = drops.concat(C.chestLoot(rng, p.floor));
+    if (m.miniBoss) drops.push({ id: 'key', qty: 1, rarity: 'common' }); // golden chest keys
     drops.forEach(function (d) {
       if (d.gold) st.groundItems.push({ x: m.x, y: m.y, gold: d.gold });
-      else st.groundItems.push({ x: m.x, y: m.y, id: d.id, qty: d.qty, rarity: d.rarity });
+      else st.groundItems.push({ x: m.x, y: m.y, id: d.id, qty: d.qty, rarity: d.rarity, affixes: d.affixes });
     });
 
     SC.systems.questProgress(p, 'kill', m.id, 1);
@@ -507,13 +764,17 @@ SC.game = (function () {
       var g = st.groundItems[i];
       if (g.x !== p.x || g.y !== p.y) continue;
       if (g.gold) {
-        p.gold += g.gold;
-        SC.render.floatText(p.x, p.y, '+' + g.gold + 'g', '#f1c40f');
+        var gf = E.effective(p).goldFind || 0;
+        var amt = Math.round(g.gold * (1 + gf));
+        p.gold += amt;
+        SC.render.floatText(p.x, p.y, '+' + amt + 'g', '#f1c40f');
+        U.emit('sfx', 'gold');
         st.groundItems.splice(i, 1);
       } else {
-        if (E.addItem(p, g.id, g.qty || 1, g.rarity)) {
+        if (E.addItem(p, g.id, g.qty || 1, g.rarity, g.affixes)) {
           var def = E.itemDef(g.id) || E.lookup('materials', g.id) || { name: g.id };
           U.emit('msg', 'Picked up: ' + def.name + ((g.qty || 1) > 1 ? ' ×' + g.qty : ''));
+          U.emit('sfx', 'pickup');
           SC.systems.questProgress(p, 'collect', g.id, g.qty || 1);
           st.groundItems.splice(i, 1);
         }
@@ -529,9 +790,10 @@ SC.game = (function () {
     var drops = C.chestLoot(rng, p.floor);
     drops.forEach(function (d) {
       if (d.gold) { p.gold += d.gold; SC.render.floatText(x, y, '+' + d.gold + 'g', '#f1c40f'); }
-      else st.groundItems.push({ x: x, y: y, id: d.id, qty: d.qty, rarity: d.rarity });
+      else st.groundItems.push({ x: x, y: y, id: d.id, qty: d.qty, rarity: d.rarity, affixes: d.affixes });
     });
     U.emit('msg', 'The chest creaks open…');
+    U.emit('sfx', 'chest');
     SC.systems.checkAchievements(p);
   }
 
@@ -545,6 +807,7 @@ SC.game = (function () {
     else if (roll < 0.7) { E.addEffect(p, 'shielded', 60); U.emit('msg', '✨ A protective aura surrounds you!'); }
     else if (roll < 0.85) { E.addEffect(p, 'regenerating', 60); U.emit('msg', '✨ Your wounds begin to knit themselves!'); }
     else { E.gainXp(p, E.xpForLevel(p.level) / 3 | 0); U.emit('msg', '✨ Ancient knowledge fills your mind!'); }
+    U.emit('sfx', 'shrine');
   }
 
   function triggerTrap(x, y) {
@@ -559,6 +822,8 @@ SC.game = (function () {
     if (roll < 0.25) E.addEffect(p, 'poisoned', 6);
     else if (roll < 0.4) E.addEffect(p, 'bleeding', 5);
     U.emit('msg', '⚠ You stepped on a trap!');
+    U.emit('sfx', 'trap');
+    SC.render.shake(4);
     if (p.hp <= 0) die();
   }
 
@@ -600,7 +865,15 @@ SC.game = (function () {
     var skillId = p.skillSlots[idx];
     if (!skillId) return U.emit('msg', 'No skill in that slot yet.');
     var res = C.useSkill(skillCtx(), skillId);
-    if (res.ok) { if (res.msg) U.emit('msg', res.msg); }
+    if (res.ok) {
+      if (res.msg) U.emit('msg', res.msg);
+      var sid = skillId.toLowerCase();
+      U.emit('sfx', /fire|meteor|hellfire|blast|flame/.test(sid) ? 'skill_fire' :
+        /frost|ice|blizzard/.test(sid) ? 'skill_ice' :
+        /lightning|chain|thunder|storm/.test(sid) ? 'skill_bolt' :
+        /heal|rejuven|miracle|holy|smite|divine|bless/.test(sid) ? 'skill_holy' :
+        /raise|summon|blood|hex|curse|doom|soul|death/.test(sid) ? 'skill_dark' : 'skill_bolt');
+    }
     else if (res.reason === 'mana') U.emit('msg', 'Not enough mana!');
     else if (res.reason === 'cooldown') U.emit('msg', 'Still on cooldown.');
     else if (res.reason === 'notarget') U.emit('msg', 'No target in range.');
@@ -663,7 +936,10 @@ SC.game = (function () {
       return;
     }
     var res = C.useConsumable(skillCtx(), invIndex);
-    if (res.ok && res.msg) U.emit('msg', res.msg);
+    if (res.ok && res.msg) {
+      U.emit('msg', res.msg);
+      U.emit('sfx', def.kind === 'potion' ? 'potion' : (def.kind === 'food' ? 'pickup' : 'skill_bolt'));
+    }
     else if (!res.ok) U.emit('msg', 'You cannot use that here.');
     U.emit('hud:update');
   }
@@ -674,6 +950,8 @@ SC.game = (function () {
     SC.systems.checkAchievements(p);
     var lost = Math.floor(p.gold * 0.1);
     p.gold -= lost;
+    U.emit('sfx', 'death');
+    SC.render.shake(12);
     U.emit('toast', { text: '💀 You died! Lost ' + lost + ' gold.', cls: 'bad' });
     U.emit('msg', 'Darkness takes you… but your haven calls you back.');
     p.effects = [];
@@ -689,6 +967,7 @@ SC.game = (function () {
   }
 
   function winGame() {
+    U.emit('sfx', 'victory');
     U.emit('toast', { text: '👑 THE DEMON KING IS SLAIN!', cls: 'gold' });
     U.emit('game:won');
     var p = st.player;
@@ -698,12 +977,25 @@ SC.game = (function () {
   }
 
   // --------------------------------------------------------------- modes
+  function cycleCamera() {
+    if (st.mode !== 'crypt') return;
+    var order = ['top', 'tpp', 'fpp'];
+    st.camera = order[(order.indexOf(st.camera) + 1) % order.length];
+    var names = { top: '🗺 Top-down view', tpp: '🎮 Third-person view', fpp: '👁 First-person view' };
+    U.emit('msg', names[st.camera] + (st.camera !== 'top' ? ' — drag right side of screen (or Q/E, mouse drag) to look' : ''));
+    U.emit('camera:changed', st.camera);
+    U.emit('sfx', 'ui');
+  }
+
   function switchMode(mode) {
     if (mode === st.mode) return;
     if (st.mode === 'arena') { SC.arena.leave(); if (SC.net) SC.net.leaveArena(); }
+    if (st.mode === 'siege' && SC.siege) SC.siege.abort(st);
     st.mode = mode;
     st.buildPlacing = null;
     st.selectedBuilding = null;
+    U.emit('music', mode === 'crypt' ? (st.map && st.map.bossSpawn ? 'boss' : 'crypt') : (mode === 'siege' ? 'siege' : mode));
+    if (mode === 'siege' && SC.siege) SC.siege.start(st);
     if (mode === 'arena') {
       var p = st.player;
       var online = SC.net && SC.net.isConnected();
@@ -738,6 +1030,8 @@ SC.game = (function () {
   function onCanvasTap(pt) {
     var p = st.player;
     if (!st.started) return;
+    if (SC.input.wasDragging && SC.input.wasDragging()) return; // camera drag, not a tap
+    if (st.mode === 'crypt' && st.camera !== 'top') { doAttack(); return; }
     if (st.mode === 'crypt') {
       var TILE = SC.render.tileSize();
       var cam = SC.render.camera();
@@ -778,11 +1072,19 @@ SC.game = (function () {
 
   // --------------------------------------------------------------- wiring
   function init() {
-    U.on('action:attack', function () { if (st.mode === 'crypt') doAttack(); else if (st.mode === 'arena') { /* handled by held check */ } });
+    U.on('action:attack', function () {
+      if (st.mode === 'crypt') doAttack();
+      else if (st.mode === 'siege' && SC.siege) SC.siege.heroAttack(st);
+    });
     U.on('action:interact', function () {
       if (st.mode === 'crypt') interact();
       else if (st.mode === 'arena') { var A = SC.arena.state(); if (A) SC.arena.dropBomb(A.me); }
     });
+    U.on('action:dash', function () {
+      if (st.mode === 'crypt') doDash();
+      else if (st.mode === 'siege' && SC.siege) SC.siege.heroDash(st);
+    });
+    U.on('action:camera', cycleCamera);
     U.on('action:skill', useSkillSlot);
     U.on('action:descend', descend);
     U.on('action:ascend', ascend);
@@ -813,9 +1115,9 @@ SC.game = (function () {
     state: st,
     init: init,
     newGame: newGame, loadGame: loadGame, hasSave: hasSave, save: save, wipeSave: wipeSave,
-    switchMode: switchMode, startDescent: startDescent,
+    switchMode: switchMode, startDescent: startDescent, cycleCamera: cycleCamera,
     interact: interact, descend: descend, ascend: ascend,
-    useSkillSlot: useSkillSlot, useInventoryItem: useInventoryItem,
-    enterFloor: enterFloor
+    useSkillSlot: useSkillSlot, useInventoryItem: useInventoryItem, doDash: doDash,
+    enterFloor: enterFloor, monsterAt: monsterAt, die: die
   };
 })();

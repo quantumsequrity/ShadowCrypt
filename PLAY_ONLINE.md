@@ -2,6 +2,17 @@
 
 ShadowCrypt is now a **cross-platform action MMORPG** that runs in any browser — phone, tablet, or PC — **fully playable offline** and with online multiplayer when a server is available. The original terminal roguelike still lives in this repo (see `HOW_TO_PLAY.md`); this guide covers the web game in `web/`.
 
+## ✨ What makes it special
+
+- **Three camera modes** — press **V** (or 🎥): classic **top-down**, cinematic **third-person** behind your hero, and full **first-person** with a weapon viewmodel and crosshair. In TPP/FPP, joystick-up walks forward and dragging the right side of the screen (or mouse-drag / Q & E) looks around — shooter-style controls.
+- **Anime cel-shaded art** — heroes with spiky class-colored hair and big expressive eyes, bold-outlined sprite monsters in 16 body families (slimes wobble, bats flap, ghosts wave, dragons beat their wings), all drawn procedurally — zero downloaded assets.
+- **Fully synthesized audio** — 35+ sound effects and adaptive generative music (dark ambient in the crypt, drums in the arena and sieges, a dread theme on boss floors), created live with WebAudio. No audio files.
+- **Combat that feels good** — 120° melee arcs, crit knockback, a dodge-dash with i-frames (Shift/💨), screen shake, hit-flashes, and telegraphed boss abilities: dodge the glowing rings before the slam lands. Bosses enrage at half health.
+- **Deep loot** — elite monsters (Frenzied, Vampiric, Colossal…) with auras and bonus drops; item affixes ("Flame Sword of the Leech") with procs, lifesteal and gold-find; locked golden chests opened by keys from mini-bosses; smashable urns and crates.
+- **Talents** — every level grants 3 points to spend on Might, Vitality, Bulwark, Spirit or Agility.
+- **Playable siege defense** — every 4 hours your haven can be attacked: fight waves *yourself* alongside your towers and bone walls, Clash-style, for gold, materials and XP.
+- **Server leaderboards** — deepest-floor rankings across everyone on your server (Menu ▸ Ranks).
+
 ---
 
 ## Quick Start

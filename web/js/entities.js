@@ -115,6 +115,59 @@ SC.entities = (function () {
     return (sub && sub.bonuses) || {};
   }
 
+  // ---- Item affixes: rolled onto dropped equipment, deepen the loot game ----
+  var AFFIXES = {
+    bear: { id: 'bear', name: 'of the Bear', hp: 12, weight: 3 },
+    viper: { id: 'viper', name: 'of the Viper', spd: 3, weight: 3 },
+    power: { id: 'power', name: 'of Power', atk: 4, weight: 3 },
+    warding: { id: 'warding', name: 'of Warding', def: 3, weight: 3 },
+    wisdom: { id: 'wisdom', name: 'of Wisdom', mana: 10, weight: 3 },
+    flames: { id: 'flames', name: 'of Flames', proc: 'burning', procChance: 0.2, weight: 2 },
+    frost: { id: 'frost', name: 'of Frost', proc: 'frozen', procChance: 0.12, weight: 2 },
+    venom: { id: 'venom', name: 'of Venom', proc: 'poisoned', procChance: 0.22, weight: 2 },
+    leech: { id: 'leech', name: 'of the Leech', lifesteal: 0.12, weight: 1.5 },
+    fortune: { id: 'fortune', name: 'of Fortune', goldFind: 0.3, weight: 1.5 },
+    titans: { id: 'titans', name: 'of Titans', atk: 3, hp: 8, def: 2, weight: 0.8 }
+  };
+
+  function affixDef(id) { return AFFIXES[id]; }
+
+  function affixBonus(p, stat) {
+    var total = 0;
+    for (var slot in p.equipment) {
+      var it = p.equipment[slot];
+      if (!it || !it.affixes) continue;
+      for (var i = 0; i < it.affixes.length; i++) {
+        var a = AFFIXES[it.affixes[i]];
+        if (a && a[stat]) total += a[stat];
+      }
+    }
+    return total;
+  }
+
+  function affixProcs(p) {
+    var procs = [];
+    for (var slot in p.equipment) {
+      var it = p.equipment[slot];
+      if (!it || !it.affixes) continue;
+      for (var i = 0; i < it.affixes.length; i++) {
+        var a = AFFIXES[it.affixes[i]];
+        if (a && (a.proc || a.lifesteal)) procs.push(a);
+      }
+    }
+    return procs;
+  }
+
+  // ---- Elite monster affixes -----------------------------------------------
+  var ELITE_AFFIXES = [
+    { id: 'frenzied', name: 'Frenzied', color: '#ff9d3a', atkMult: 1.35, spdAdd: 4 },
+    { id: 'armored', name: 'Armored', color: '#9fb4d0', defMult: 2.2, hpMult: 1.2 },
+    { id: 'venomous', name: 'Venomous', color: '#69d84f', onHit: 'poisoned' },
+    { id: 'blazing', name: 'Blazing', color: '#ff5c38', onHit: 'burning' },
+    { id: 'vampiric', name: 'Vampiric', color: '#e0409a', lifesteal: 0.5 },
+    { id: 'colossal', name: 'Colossal', color: '#d8c66a', hpMult: 2.0, atkMult: 1.15 }
+  ];
+
   function rarityMult(rarity) {
     var rs = D().rarities || [];
     for (var i = 0; i < rs.length; i++) if (rs[i].id === rarity) return rs[i].multiplier || 1;
@@ -144,14 +197,17 @@ SC.entities = (function () {
   // Effective (fully derived) stats
   function effective(p) {
     var sb = subclassBonuses(p);
+    var tal = p.talents || {};
     var lvl = p.level - 1;
     var growth = classGrowth(p.classId);
     var e = {
-      maxHp: p.base.hp + (sb.hp || 0) + lvl * growth.hp + equipStat(p, 'hp'),
-      maxMp: p.base.mana + (sb.mana || 0) + lvl * growth.mana + equipStat(p, 'mana'),
-      atk: p.base.atk + (sb.atk || 0) + lvl * growth.atk + equipStat(p, 'atk'),
-      def: p.base.def + (sb.def || 0) + lvl * growth.def + equipStat(p, 'def'),
-      spd: p.base.spd + (sb.spd || 0) + Math.floor(lvl / 4) + equipStat(p, 'spd')
+      maxHp: p.base.hp + (sb.hp || 0) + lvl * growth.hp + equipStat(p, 'hp') + affixBonus(p, 'hp') + (tal.hp || 0) * 4,
+      maxMp: p.base.mana + (sb.mana || 0) + lvl * growth.mana + equipStat(p, 'mana') + affixBonus(p, 'mana') + (tal.mana || 0) * 3,
+      atk: p.base.atk + (sb.atk || 0) + lvl * growth.atk + equipStat(p, 'atk') + affixBonus(p, 'atk') + (tal.atk || 0),
+      def: p.base.def + (sb.def || 0) + lvl * growth.def + equipStat(p, 'def') + affixBonus(p, 'def') + (tal.def || 0),
+      spd: p.base.spd + (sb.spd || 0) + Math.floor(lvl / 4) + equipStat(p, 'spd') + affixBonus(p, 'spd') + Math.floor((tal.spd || 0) / 2),
+      goldFind: affixBonus(p, 'goldFind'),
+      lifesteal: affixBonus(p, 'lifesteal')
     };
     // status effect modifiers
     for (var i = 0; i < p.effects.length; i++) {
@@ -186,6 +242,8 @@ SC.entities = (function () {
       p.xp -= xpForLevel(p.level);
       p.level++;
       leveled = true;
+      p.talents = p.talents || { atk: 0, hp: 0, mana: 0, spd: 0, def: 0 };
+      p.talentPoints = (p.talentPoints || 0) + 3;
       var eff = effective(p);
       p.hp = eff.maxHp; p.mp = eff.maxMp;
       U.emit('player:levelup', p.level);
@@ -197,7 +255,7 @@ SC.entities = (function () {
   // ---- Inventory ----------------------------------------------------------
   var STACKABLE = { potion: true, scroll: true, food: true, special: true, material: true, seed: true };
 
-  function addItem(p, id, qty, rarity) {
+  function addItem(p, id, qty, rarity, affixes) {
     qty = qty || 1;
     var def = itemDef(id) || (lookup('materials', id) ? Object.assign({ kind: 'material' }, lookup('materials', id)) : null);
     var kind = def ? def.kind : 'special';
@@ -211,7 +269,7 @@ SC.entities = (function () {
       }
     }
     if (p.inventory.length >= 48 && !STACKABLE[kind]) { U.emit('msg', 'Inventory full!'); return false; }
-    p.inventory.push({ id: id, qty: qty, rarity: rarity || 'common' });
+    p.inventory.push({ id: id, qty: qty, rarity: rarity || 'common', affixes: affixes });
     U.emit('inv:changed');
     return true;
   }
@@ -246,9 +304,9 @@ SC.entities = (function () {
     if (slot === 'ring') target = p.equipment.ring1 ? (p.equipment.ring2 ? 'ring1' : 'ring2') : 'ring1';
     if (!target) return false;
     var prev = p.equipment[target];
-    p.equipment[target] = { id: st.id, rarity: st.rarity || 'common' };
+    p.equipment[target] = { id: st.id, rarity: st.rarity || 'common', affixes: st.affixes };
     p.inventory.splice(invIndex, 1);
-    if (prev) p.inventory.push({ id: prev.id, qty: 1, rarity: prev.rarity || 'common' });
+    if (prev) p.inventory.push({ id: prev.id, qty: 1, rarity: prev.rarity || 'common', affixes: prev.affixes });
     var eff = effective(p);
     p.hp = Math.min(p.hp, eff.maxHp); p.mp = Math.min(p.mp, eff.maxMp);
     U.emit('inv:changed');
@@ -260,7 +318,7 @@ SC.entities = (function () {
     if (!it) return false;
     if (p.inventory.length >= 48) { U.emit('msg', 'Inventory full!'); return false; }
     p.equipment[slot] = null;
-    p.inventory.push({ id: it.id, qty: 1, rarity: it.rarity || 'common' });
+    p.inventory.push({ id: it.id, qty: 1, rarity: it.rarity || 'common', affixes: it.affixes });
     U.emit('inv:changed');
     return true;
   }
@@ -339,7 +397,8 @@ SC.entities = (function () {
   }
 
   var monsterSeq = 1;
-  function spawnMonster(template, x, y, floor) {
+  function spawnMonster(template, x, y, floor, opts) {
+    opts = opts || {};
     var scale = 1 + Math.max(0, floor - 1) * 0.06;
     var flags = template.flags || {};
     var m = {
@@ -365,6 +424,16 @@ SC.entities = (function () {
       lastSeenPlayer: null
     };
     if (m.boss) { m.hp = Math.round(m.hp * 1.2); m.maxHp = m.hp; }
+    // elite affix roll (never on bosses — they have their own mechanics)
+    if (!m.boss && !m.miniBoss && (opts.elite || (opts.eliteChance !== 0 && Math.random() < (opts.eliteChance != null ? opts.eliteChance : 0.12)))) {
+      var affix = ELITE_AFFIXES[Math.floor(Math.random() * ELITE_AFFIXES.length)];
+      m.affix = affix;
+      if (affix.hpMult) { m.hp = Math.round(m.hp * affix.hpMult); m.maxHp = m.hp; }
+      if (affix.atkMult) m.atk = Math.round(m.atk * affix.atkMult);
+      if (affix.defMult) m.def = Math.round(m.def * affix.defMult);
+      if (affix.spdAdd) m.spd += affix.spdAdd;
+      m.xp = Math.round(m.xp * 1.8);
+    }
     return m;
   }
 
@@ -388,6 +457,10 @@ SC.entities = (function () {
   return {
     createPlayer: createPlayer,
     effective: effective,
+    AFFIXES: AFFIXES,
+    affixDef: affixDef,
+    affixProcs: affixProcs,
+    ELITE_AFFIXES: ELITE_AFFIXES,
     xpForLevel: xpForLevel,
     gainXp: gainXp,
     assignSkills: assignSkills,

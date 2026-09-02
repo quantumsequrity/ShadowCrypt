@@ -102,6 +102,9 @@ SC.net = (function () {
       case 'loaded':
         U.emit('net:loaded', msg.data || null);
         break;
+      case 'leaderboard':
+        U.emit('net:leaderboard', msg.top || []);
+        break;
       case 'saved':
         U.emit('net:saved');
         break;
@@ -147,6 +150,11 @@ SC.net = (function () {
     send({ t: 'arena', d: d });
   }
 
+  function requestLeaderboard() {
+    if (!connected) return false;
+    return send({ t: 'leaderboard' });
+  }
+
   function cloudSave(data) {
     if (!connected) return false;
     return send({ t: 'save', data: data });
@@ -166,7 +174,7 @@ SC.net = (function () {
     cryptGhosts: cryptGhosts,
     joinArena: joinArena, leaveArena: leaveArena, sendArena: sendArena,
     arenaRoom: function () { return arenaRoom; },
-    cloudSave: cloudSave, cloudLoad: cloudLoad,
+    cloudSave: cloudSave, cloudLoad: cloudLoad, requestLeaderboard: requestLeaderboard,
     stop: function () { wantConnection = false; if (ws) try { ws.close(); } catch (e) { /* noop */ } }
   };
 })();

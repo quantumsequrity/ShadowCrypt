@@ -63,6 +63,42 @@ const wss = new WebSocket.Server({ server, path: '/ws' });
 const clients = new Map(); // ws -> {id, name, token, floor, arenaRoom}
 let seq = 1;
 
+// ---------------------------------------------------------------- leaderboard
+const LB_PATH = path.join(__dirname, 'data', 'leaderboard.json');
+let leaderboard = {};
+try { leaderboard = JSON.parse(fs.readFileSync(LB_PATH, 'utf8')); } catch (e) { leaderboard = {}; }
+let lbDirty = false;
+setInterval(() => {
+  if (!lbDirty) return;
+  lbDirty = false;
+  fs.writeFile(LB_PATH, JSON.stringify(leaderboard), () => {});
+}, 15000);
+
+function updateLeaderboard(token, save) {
+  try {
+    const p = save && save.player;
+    if (!p || !p.name) return;
+    const key = crypto.createHash('sha256').update(String(token)).digest('hex').slice(0, 16);
+    leaderboard[key] = {
+      name: String(p.name).slice(0, 16),
+      level: p.level | 0,
+      floor: (p.stats && p.stats.deepestFloor) | 0,
+      kills: (p.stats && p.stats.kills) | 0,
+      bossKills: (p.stats && p.stats.bossKills) | 0,
+      pvpWins: (p.stats && p.stats.pvpWins) | 0,
+      classId: String(p.classId || '').slice(0, 20),
+      at: Date.now()
+    };
+    lbDirty = true;
+  } catch (e) { /* never let stats break saves */ }
+}
+
+function topPlayers(n) {
+  return Object.values(leaderboard)
+    .sort((a, b) => (b.floor - a.floor) || (b.level - a.level) || (b.kills - a.kills))
+    .slice(0, n);
+}
+
 const ARENA_ROOM_MAX = 6;
 const arenaRooms = new Map(); // roomId -> {seed, members:Set<ws>}
 
@@ -194,6 +230,11 @@ wss.on('connection', (ws) => {
         fs.writeFile(savePathFor(c.token), json, (err) => {
           send(ws, err ? { t: 'error', text: 'save failed' } : { t: 'saved' });
         });
+        updateLeaderboard(c.token, msg.data);
+        break;
+      }
+      case 'leaderboard': {
+        send(ws, { t: 'leaderboard', top: topPlayers(20) });
         break;
       }
       case 'load': {

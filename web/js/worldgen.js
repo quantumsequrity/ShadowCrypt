@@ -216,6 +216,20 @@ SC.worldgen = (function () {
       if (pos && map.get(pos.x, pos.y) === T.FLOOR) map.set(pos.x, pos.y, T.TRAP);
     }
 
+    // Breakables: urns and crates with loot, plus a rare locked golden chest
+    map.breakables = [];
+    if (!boss) {
+      var brCount = rng.int(3, 6);
+      for (c = 0; c < brCount; c++) {
+        pos = randomFloorIn(map, rng.pick(rooms), rng, taken);
+        if (pos) map.breakables.push({ x: pos.x, y: pos.y, kind: rng.chance(0.5) ? 'urn' : 'crate', broken: false });
+      }
+      if (rng.chance(0.22)) {
+        pos = randomFloorIn(map, rng.pick(rooms), rng, taken);
+        if (pos) map.breakables.push({ x: pos.x, y: pos.y, kind: 'goldenChest', broken: false });
+      }
+    }
+
     // Monster + item spawn locations (resolved to actual entities by game.js using SC.DATA)
     map.monsterSpawns = [];
     map.itemSpawns = [];

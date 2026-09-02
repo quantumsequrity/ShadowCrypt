@@ -55,7 +55,7 @@ SC.ui = (function () {
   }
 
   function modeTitle() {
-    return { haven: '🏰 Haven', farm: '🌾 Farm', arena: '💥 Arena' }[G.state.mode] || '';
+    return { haven: '🏰 Haven', farm: '🌾 Farm', arena: '💥 Arena', siege: '⚔ SIEGE' }[G.state.mode] || '';
   }
 
   function setBar(barId, txtId, cur, max, labelOverride) {
@@ -160,6 +160,7 @@ SC.ui = (function () {
     crafting: { title: '⚒ Craft', render: renderCrafting },
     companions: { title: '🐺 Allies', render: renderCompanions },
     achievements: { title: '🏆 Feats', render: renderAchievements },
+    ranks: { title: '👑 Ranks', render: renderRanks },
     factions: { title: '🏛 Factions', render: renderFactions },
     build: { title: '🏗 Build', render: renderBuild },
     shop: { title: '🛒 Shop', render: renderShop },
@@ -168,7 +169,7 @@ SC.ui = (function () {
   };
 
   var TAB_SETS = {
-    menu: ['character', 'skills', 'quests', 'achievements', 'factions', 'settings', 'help'],
+    menu: ['character', 'skills', 'quests', 'achievements', 'ranks', 'factions', 'settings', 'help'],
     bag: ['inventory', 'equipment', 'crafting'],
     haven: ['build', 'companions', 'shop']
   };
@@ -233,9 +234,23 @@ SC.ui = (function () {
     if (def.def) statLine.push('DEF ' + Math.round(def.def * mult));
     if (def.bonuses) for (var b in def.bonuses) statLine.push(b.toUpperCase() + ' +' + Math.round(def.bonuses[b] * mult));
     if (def.hungerRestore) statLine.push('Hunger +' + def.hungerRestore);
+    var affixHtml = '';
+    if (stk.affixes && stk.affixes.length) {
+      affixHtml = '<br>' + stk.affixes.map(function (aid) {
+        var a = E.affixDef(aid);
+        if (!a) return '';
+        var descr = [];
+        ['hp', 'atk', 'def', 'mana', 'spd'].forEach(function (s2) { if (a[s2]) descr.push('+' + a[s2] + ' ' + s2.toUpperCase()); });
+        if (a.proc) descr.push(Math.round((a.procChance || 0.15) * 100) + '% ' + a.proc + ' on hit');
+        if (a.lifesteal) descr.push(Math.round(a.lifesteal * 100) + '% lifesteal');
+        if (a.goldFind) descr.push('+' + Math.round(a.goldFind * 100) + '% gold');
+        return '<span style="color:#c9a4ff">✨ ' + U.esc(a.name) + '</span> <span style="color:var(--dim);font-size:11px">(' + descr.join(', ') + ')</span>';
+      }).join('<br>');
+    }
     var html = (rar && rar.id !== 'common' ? '<span class="pill" style="border-color:' + rar.color + ';color:' + rar.color + '">' + rar.name + '</span> ' : '') +
       U.esc(def.description || '') +
       (statLine.length ? '<br><b>' + statLine.join(' · ') + '</b>' : '') +
+      affixHtml +
       '<br><span style="color:var(--dim)">Value: ' + Math.floor((def.value || 5) * mult) + 'g</span>';
     var equipKinds = ['weapon', 'shield', 'armor', 'helmet', 'gloves', 'boots', 'ring', 'amulet'];
     var actions = [];
@@ -301,7 +316,36 @@ SC.ui = (function () {
       '<tr><td>Crops harvested</td><td>' + s.cropsHarvested + '</td></tr>' +
       '<tr><td>Items crafted</td><td>' + s.itemsCrafted + '</td></tr>' +
       '<tr><td>Arena wins</td><td>' + s.pvpWins + '</td></tr>' +
+      '<tr><td>Sieges won</td><td>' + (s.siegesWon || 0) + '</td></tr>' +
       '<tr><td>Deaths</td><td>' + s.deaths + '</td></tr></table>';
+    // talent allocation
+    p.talents = p.talents || { atk: 0, hp: 0, mana: 0, spd: 0, def: 0 };
+    var tp = p.talentPoints || 0;
+    var tHead = document.createElement('h3');
+    tHead.style.color = 'var(--gold)';
+    tHead.textContent = '💪 Talents' + (tp > 0 ? ' — ' + tp + ' points to spend!' : '');
+    body.appendChild(tHead);
+    [['atk', '⚔ Might', '+1 ATK'], ['hp', '❤️ Vitality', '+4 HP'], ['def', '🛡 Bulwark', '+1 DEF'],
+     ['mana', '🔮 Spirit', '+3 MP'], ['spd', '💨 Agility', '+1 SPD /2pts']].forEach(function (row) {
+      var div = document.createElement('div');
+      div.className = 'equip-row';
+      div.innerHTML = '<span class="slot-name">' + row[1] + '</span><span style="flex:1;color:var(--dim);font-size:12px">' + row[2] + ' · rank <b style="color:var(--gold)">' + (p.talents[row[0]] || 0) + '</b></span>';
+      if (tp > 0) {
+        var btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.style.padding = '4px 14px';
+        btn.textContent = '+';
+        btn.onclick = function () {
+          if ((p.talentPoints || 0) <= 0) return;
+          p.talents[row[0]] = (p.talents[row[0]] || 0) + 1;
+          p.talentPoints--;
+          U.emit('sfx', 'ui');
+          refreshPanel(); updateHud(true);
+        };
+        div.appendChild(btn);
+      }
+      body.appendChild(div);
+    });
     // subclass advancement
     if (!p.subclassId && p.level >= 10) {
       var head = document.createElement('h3');
@@ -539,6 +583,34 @@ SC.ui = (function () {
     });
   }
 
+  function renderRanks(body) {
+    if (!SC.net || !SC.net.isConnected()) {
+      body.innerHTML = '<p style="color:var(--dim)">⚫ Leaderboards need an online connection.</p>';
+      return;
+    }
+    body.innerHTML = '<p style="color:var(--dim)">Fetching the deepest delvers…</p>';
+    var handler = function (top) {
+      U.off('net:leaderboard', handler);
+      if (currentPanel !== 'ranks') return;
+      body.innerHTML = '<p style="color:var(--dim);font-size:12px">Ranked by deepest floor reached.</p>';
+      if (!top.length) body.innerHTML += '<p style="color:var(--dim)">No heroes ranked yet — be the first!</p>';
+      var me = G.state.player;
+      top.forEach(function (r, i) {
+        var isMe = r.name === me.name && r.level === me.level;
+        var card = document.createElement('div');
+        card.className = 'list-card';
+        if (isMe) card.style.borderColor = 'var(--gold)';
+        var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
+        card.innerHTML = '<div class="lc-title">' + medal + ' ' + U.esc(r.name) +
+          ' <span class="pill">Lv ' + r.level + ' ' + U.esc(r.classId || '') + '</span></div>' +
+          '<div class="lc-meta">🕳 Floor ' + r.floor + ' · ⚔ ' + r.kills + ' kills · ☠ ' + r.bossKills + ' bosses · 💥 ' + r.pvpWins + ' PvP wins</div>';
+        body.appendChild(card);
+      });
+    };
+    U.on('net:leaderboard', handler);
+    SC.net.requestLeaderboard();
+  }
+
   function renderFactions(body) {
     var p = G.state.player;
     var defs = SC.systems.asArray(SC.DATA.factions);
@@ -581,6 +653,20 @@ SC.ui = (function () {
       refreshPanel();
     };
     body.appendChild(blessBtn);
+    // playable siege defense
+    if (SC.siege) {
+      var siegeBtn = document.createElement('button');
+      var ready = SC.siege.canStart(h);
+      siegeBtn.className = 'btn' + (ready ? ' btn-danger' : '');
+      siegeBtn.textContent = ready ? '⚔ REPEL SIEGE — defend for loot!' : '⚔ Next siege in ' + U.fmtTime(SC.siege.nextIn(h));
+      siegeBtn.disabled = !ready;
+      siegeBtn.onclick = function () {
+        closePanel();
+        G.switchMode('siege');
+        pushMsg('Defend the Keep! Move + attack like the crypt. Towers and walls fight with you.');
+      };
+      body.appendChild(siegeBtn);
+    }
     var hint = document.createElement('p');
     hint.style.cssText = 'color:var(--dim);font-size:12px';
     hint.textContent = 'Tap a building on the haven grid to select it (upgrade/collect). Choose one below to place a new one.';
@@ -740,8 +826,35 @@ SC.ui = (function () {
   function renderSettings(body) {
     var online = SC.net && SC.net.isConnected();
     body.innerHTML = '<div class="list-card"><div class="lc-title">' + (online ? '🟢 Online' : '⚫ Offline') + '</div>' +
-      '<div class="lc-sub">' + (online ? SC.net.onlineCount() + ' adventurers online. Chat, co-op ghosts, arena PvP and cloud saves active.' :
+      '<div class="lc-sub">' + (online ? SC.net.onlineCount() + ' adventurers online. Chat, co-op ghosts, arena PvP, leaderboards and cloud saves active.' :
         'Playing offline — everything works locally. Connect to a server for multiplayer.') + '</div></div>';
+    // audio / fx toggles
+    var au = SC.audio ? SC.audio.settings() : { sfx: true, music: true };
+    var fx = SC.render.fxSettings();
+    [['🔊 Sound effects', au.sfx, function (on) { SC.audio.setSfx(on); }],
+     ['🎵 Music', au.music, function (on) { SC.audio.setMusic(on); }],
+     ['📳 Screen shake', fx.shake, function (on) { SC.render.setShakeEnabled(on); }]].forEach(function (row) {
+      var div = document.createElement('div');
+      div.className = 'equip-row';
+      div.innerHTML = '<span style="flex:1">' + row[0] + '</span>';
+      var btn = document.createElement('button');
+      btn.className = 'btn' + (row[1] ? ' btn-primary' : '');
+      btn.textContent = row[1] ? 'ON' : 'OFF';
+      btn.onclick = function () { row[2](!row[1]); U.emit('sfx', 'ui'); refreshPanel(); };
+      div.appendChild(btn);
+      body.appendChild(div);
+    });
+    // camera mode
+    var camDiv = document.createElement('div');
+    camDiv.className = 'equip-row';
+    var camNames = { top: '🗺 Top-down', tpp: '🎮 Third-person', fpp: '👁 First-person' };
+    camDiv.innerHTML = '<span style="flex:1">🎥 Crypt camera: <b style="color:var(--gold)">' + camNames[G.state.camera] + '</b></span>';
+    var camBtn = document.createElement('button');
+    camBtn.className = 'btn';
+    camBtn.textContent = 'Switch (V)';
+    camBtn.onclick = function () { G.cycleCamera(); refreshPanel(); };
+    camDiv.appendChild(camBtn);
+    body.appendChild(camDiv);
     var saveBtn = document.createElement('button');
     saveBtn.className = 'btn btn-primary'; saveBtn.textContent = '💾 Save now';
     saveBtn.onclick = function () { G.save(); toast({ text: 'Saved!', cls: 'gold' }); };
@@ -759,7 +872,8 @@ SC.ui = (function () {
 
   function renderHelp(body) {
     body.innerHTML =
-      '<div class="list-card"><div class="lc-title">🗡 Crypt</div><div class="lc-sub">Move: WASD/arrows/joystick, or tap a tile. Attack: Space/⚔ (hold to auto-attack). Skills: 1-4. Interact (doors, chests, shrines, stairs): G/E/✦. Descend all 30 floors and slay the Demon King. Death sends you home — you keep your gear, lose 10% gold.</div></div>' +
+      '<div class="list-card"><div class="lc-title">🗡 Crypt</div><div class="lc-sub">Move: WASD/arrows/joystick, or tap a tile. Attack: Space/⚔️ (hold to auto-attack — melee sweeps a 120° arc, crits knock back). Dash with i-frames: Shift/💨. Skills: 1-4. Interact: G/F/✋. Smash urns and crates for loot; mini-bosses drop 🗝️ Keys for golden chests. Elite monsters glow — extra loot. Descend all 30 floors and slay the Demon King.</div></div>' +
+      '<div class="list-card"><div class="lc-title">🎥 Camera — Top-down / TPP / FPP</div><div class="lc-sub">Press V or 🎥 to cycle views: classic top-down, third-person behind your hero, or full first-person. In TPP/FPP: joystick-up walks forward, drag the RIGHT side of the screen (or mouse-drag / Q & E) to look around — PUBG style. Tap the screen to attack.</div></div>' +
       '<div class="list-card"><div class="lc-title">🏰 Haven</div><div class="lc-sub">Your base. Place buildings, collect gold from mines over time (even while away), upgrade the Keep to unlock more. Towers and walls defend against shadow sieges every 8 hours.</div></div>' +
       '<div class="list-card"><div class="lc-title">🌾 Farm</div><div class="lc-sub">Build farm plots, plant seeds, water them (2× speed), harvest food and potion ingredients. Crops grow in real time — even while you are offline.</div></div>' +
       '<div class="list-card"><div class="lc-title">💥 Arena</div><div class="lc-sub">Real-time PvP! Move with joystick/WASD, hold ⚔ to shoot, ✦ drops a bomb. Grab power-ups. Online: fight other players; offline: training bots.</div></div>' +
@@ -882,6 +996,24 @@ SC.ui = (function () {
         { label: 'Back to Haven', onClick: function () { G.switchMode('haven'); setNavActive('haven'); } }
       ]);
     });
+    U.on('siege:over', function (res) {
+      if (res.won) {
+        modal('🏆 SIEGE REPELLED!', 'Your haven stands! ' + res.kills + ' shadow creatures destroyed.<br><br>' + res.loot.map(U.esc).join('<br>'), [
+          { label: 'Glory!', primary: true, onClick: function () { G.switchMode('haven'); setNavActive('haven'); } }
+        ]);
+      } else {
+        modal('💀 The Keep has fallen…', 'The shadows looted ' + res.loss + ' gold. Build more towers and bone walls, then try again.<br>You slew ' + res.kills + ' attackers.', [
+          { label: 'Rebuild', onClick: function () { G.switchMode('haven'); setNavActive('haven'); } }
+        ]);
+      }
+    });
+    U.on('player:levelup', function (lvl) {
+      U.emit('sfx', 'levelup');
+      if (G.state.player && (G.state.player.talentPoints || 0) > 0) {
+        toast({ text: '💪 ' + G.state.player.talentPoints + ' talent points — open Menu ▸ Hero', cls: 'gold' });
+      }
+    });
+    U.on('camera:changed', function () { updateHud(true); });
     U.on('game:won', function () {
       modal('👑 THE DEMON KING IS SLAIN!',
         'You have conquered all 30 floors of ShadowCrypt. The realm is free… for now.<br><br>+5000 gold, +10000 XP.<br>The crypt reshuffles for your next descent — try a deeper portal, a new class, or the arena!',

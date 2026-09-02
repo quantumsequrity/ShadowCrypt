@@ -27,7 +27,21 @@ SC.combat = (function () {
     var dmg = computeDamage(eff.atk, m.def, mult);
     m.hp -= dmg;
     m.aiState = 'chase';
-    return { dmg: dmg, crit: crit, killed: m.hp <= 0 };
+    m.flashUntil = Date.now() + 90;
+    // gear affix procs
+    var procs = E.affixProcs(p);
+    var procApplied = null;
+    for (var i = 0; i < procs.length; i++) {
+      var a = procs[i];
+      if (a.proc && Math.random() < (a.procChance || 0.15)) {
+        E.addEffect(m, a.proc, 4);
+        procApplied = a.proc;
+      }
+    }
+    if (eff.lifesteal > 0) {
+      p.hp = Math.min(eff.maxHp, p.hp + Math.max(1, Math.round(dmg * eff.lifesteal)));
+    }
+    return { dmg: dmg, crit: crit, killed: m.hp <= 0, proc: procApplied };
   }
 
   function monsterAttack(m, p) {
@@ -37,6 +51,11 @@ SC.combat = (function () {
     var dmg = computeDamage(m.atk, eff.def, mult);
     if (E.hasEffect(p, 'shielded')) dmg = Math.max(1, Math.round(dmg * 0.6));
     p.hp -= dmg;
+    // elite on-hit effects
+    if (m.affix) {
+      if (m.affix.onHit && Math.random() < 0.35) E.addEffect(p, m.affix.onHit, 4);
+      if (m.affix.lifesteal) m.hp = Math.min(m.maxHp, m.hp + Math.round(dmg * m.affix.lifesteal));
+    }
     return { dmg: dmg };
   }
 
@@ -64,6 +83,23 @@ SC.combat = (function () {
     return out;
   }
 
+  var EQUIP_KINDS = ['weapon', 'shield', 'armor', 'helmet', 'gloves', 'boots', 'ring', 'amulet'];
+
+  // Affix count scales with rarity: rare 35%/1, epic 1, legendary 1-2, mythic 2
+  function rollAffixes(rng, rarity) {
+    var count = 0;
+    if (rarity === 'rare') count = rng.chance(0.35) ? 1 : 0;
+    else if (rarity === 'epic') count = 1;
+    else if (rarity === 'legendary') count = rng.chance(0.5) ? 2 : 1;
+    else if (rarity === 'mythic') count = 2;
+    if (!count) return undefined;
+    var ids = ['bear', 'viper', 'power', 'warding', 'wisdom', 'flames', 'frost', 'venom', 'leech', 'fortune', 'titans'];
+    var out = [];
+    rng.shuffle(ids);
+    for (var i = 0; i < count; i++) out.push(ids[i]);
+    return out;
+  }
+
   function rollLoot(rng, floor, luck) {
     var drops = [];
     var goldAmt = rng.int(3, 8 + floor * 2);
@@ -78,11 +114,12 @@ SC.combat = (function () {
           return minF <= floor + 2;
         });
         var pick = rng.pick(filtered.length ? filtered : pool);
-        var rar = 'common';
-        if (['weapon', 'shield', 'armor', 'helmet', 'gloves', 'boots', 'ring', 'amulet'].indexOf(pick.kind) >= 0) {
+        var rar = 'common', affixes;
+        if (EQUIP_KINDS.indexOf(pick.kind) >= 0) {
           rar = rollRarity(rng, floor);
+          affixes = rollAffixes(rng, rar);
         }
-        drops.push({ id: pick.id, qty: 1, rarity: rar });
+        drops.push({ id: pick.id, qty: 1, rarity: rar, affixes: affixes });
       }
     }
     return drops;
@@ -98,8 +135,9 @@ SC.combat = (function () {
         return minF <= floor + 4;
       });
       var pick = rng.pick(filtered.length ? filtered : pool);
-      var rar = rollRarity(rng, floor + 3);
-      drops.push({ id: pick.id, qty: 1, rarity: pick.kind === 'potion' || pick.kind === 'scroll' || pick.kind === 'food' ? 'common' : rar });
+      var isEquip = EQUIP_KINDS.indexOf(pick.kind) >= 0;
+      var rar = isEquip ? rollRarity(rng, floor + 3) : 'common';
+      drops.push({ id: pick.id, qty: 1, rarity: rar, affixes: isEquip ? rollAffixes(rng, rar) : undefined });
     }
     // crafting material chance
     var mats = (SC.DATA && SC.DATA.materials) || {};

@@ -107,6 +107,7 @@ SC.arena = (function () {
         ttl: 1400, color: f.color
       });
     });
+    if (f === A.me) U.emit('sfx', 'shoot');
     if (f === A.me && A.online && SC.net) SC.net.sendArena({ t: 'fire', dirs: dirs, x: f.x, y: f.y });
   }
 
@@ -255,6 +256,8 @@ SC.arena = (function () {
         var radius = (cfg().bombRadius || 2.4) * (bomb.mega ? 1.6 : 1);
         var dmg = (cfg().bombDamage || 42) * (bomb.mega ? 1.5 : 1);
         spawnBurst(bomb.x, bomb.y, '#ffb15c', 26);
+        U.emit('sfx', 'explosion');
+        if (SC.render && SC.render.shake) SC.render.shake(6);
         if (me.hp > 0 && U.dist(bomb.x, bomb.y, me.x, me.y) < radius) {
           hurt(me, Math.round(dmg), bomb.owner);
           if (A.online && SC.net) SC.net.sendArena({ t: 'hp', hp: me.hp });
