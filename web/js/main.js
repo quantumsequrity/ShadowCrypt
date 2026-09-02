@@ -24,6 +24,34 @@ var SC = (typeof window !== 'undefined') ? (window.SC = window.SC || {}) : (glob
       } else showCreate();
     };
     $('boot-status').textContent = (navigator.onLine ? 'online' : 'offline') + ' · works offline · v1.0';
+    SC.assets.onReady(renderTitleHeroes);
+  }
+
+  // Sprite parade on the title screen: the six heroes flanked by a demon and a dragon
+  function renderTitleHeroes() {
+    var host = $('title-heroes');
+    if (!host || host.childNodes.length) return;
+    function mini(src, size) {
+      var c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      var g = c.getContext('2d');
+      g.imageSmoothingEnabled = false;
+      g.drawImage(src, 0, 0, size, size);
+      return c;
+    }
+    var demonKey = SC.assets.enemyKey('demon_king') || SC.assets.enemyKey('imp');
+    if (demonKey) {
+      var dc = SC.assets.iconCanvas(demonKey, 56);
+      if (dc) host.appendChild(dc);
+    }
+    ['warrior', 'mage', 'rogue', 'paladin', 'ranger', 'necromancer'].forEach(function (cid) {
+      host.appendChild(mini(SC.render.spriteHero(cid, 0), 52));
+    });
+    var dragonKey = SC.assets.enemyKey('ice_dragon') || SC.assets.enemyKey('ancient_dragon');
+    if (dragonKey) {
+      var gc = SC.assets.iconCanvas(dragonKey, 56);
+      if (gc) host.appendChild(gc);
+    }
   }
 
   function showCreate() {
@@ -109,9 +137,21 @@ var SC = (typeof window !== 'undefined') ? (window.SC = window.SC || {}) : (glob
     (SC.DATA.classes || []).forEach(function (c) {
       var card = document.createElement('div');
       card.className = 'pick-card' + (chosen.classId === c.id ? ' sel' : '');
-      card.innerHTML = '<div class="pc-name">' + classIcon(c.id) + ' ' + U.esc(c.name) + '</div>' +
+      // live hero sprite preview
+      if (SC.assets && SC.assets.isReady()) {
+        var pv = document.createElement('canvas');
+        pv.width = 44; pv.height = 44;
+        pv.className = 'pc-sprite';
+        var pg = pv.getContext('2d');
+        pg.imageSmoothingEnabled = false;
+        pg.drawImage(SC.render.spriteHero(c.id, 0), 0, 0, 44, 44);
+        card.appendChild(pv);
+      }
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="pc-name">' + classIcon(c.id) + ' ' + U.esc(c.name) + '</div>' +
         '<div class="pc-desc">' + U.esc(c.specialAbility || '') + '</div>' +
         '<div class="pc-stats">HP ' + c.hp + ' · ATK ' + c.atk + ' · DEF ' + c.def + ' · MP ' + c.mana + ' · SPD ' + c.spd + '</div>';
+      card.appendChild(body);
       card.onclick = function () {
         chosen.classId = c.id;
         renderClasses();

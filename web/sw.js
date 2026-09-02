@@ -1,6 +1,6 @@
 'use strict';
 /* ShadowCrypt Online — service worker: full offline play via cache-first app shell */
-var CACHE = 'shadowcrypt-v3';
+var CACHE = 'shadowcrypt-v4';
 var ASSETS = [
   './',
   'index.html',
@@ -23,6 +23,8 @@ var ASSETS = [
   'js/data/data_world.js',
   'js/data/data_mmo.js',
   'js/data/data_sprites.js',
+  'fonts/PressStart2P.woff2',
+  'fonts/LICENSE-fonts.txt',
   'js/util.js',
   'js/assets.js',
   'js/audio.js',

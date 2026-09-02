@@ -1,4 +1,11 @@
 /* ShadowCrypt Online — mobile-first, dark crypt theme */
+@font-face {
+  font-family: 'Press Start 2P';
+  src: url('../fonts/PressStart2P.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+.pixel-font, .game-title, .game-subtitle { font-family: 'Press Start 2P', monospace; }
 :root {
   --bg: #0b0e14;
   --bg2: #121826;
@@ -63,8 +70,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 }
 .title-wrap { text-align: center; padding: 24px; position: relative; z-index: 1; }
 .game-title {
-  font-size: clamp(40px, 10vw, 84px); letter-spacing: 6px; margin: 0;
-  font-weight: 900;
+  font-size: clamp(22px, 5.6vw, 52px); letter-spacing: 3px; margin: 0; line-height: 1.25;
+  font-weight: 400;
   background: linear-gradient(180deg, #ffffff 0%, #d9c2ff 45%, #8e5fd0 100%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: #d9c2ff;
@@ -76,12 +83,21 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   -webkit-text-fill-color: transparent;
 }
 .game-subtitle {
-  font-size: clamp(16px, 4vw, 26px); letter-spacing: 14px; color: var(--gold);
+  font-size: clamp(10px, 2.4vw, 17px); letter-spacing: 10px; color: var(--gold);
   margin-top: 2px; text-shadow: 0 0 18px #f1c40f88;
   animation: pulse-sub 3.2s ease-in-out infinite;
 }
 @keyframes pulse-sub { 50% { text-shadow: 0 0 34px #f1c40fcc; } }
-.title-tagline { color: #9aa6c4; margin: 18px 0 28px; letter-spacing: 3px; font-size: 13px; text-transform: uppercase; }
+.title-tagline { color: #9aa6c4; margin: 16px 0 10px; letter-spacing: 3px; font-size: 13px; text-transform: uppercase; }
+#title-heroes {
+  display: flex; justify-content: center; align-items: flex-end; gap: 10px;
+  min-height: 64px; margin: 6px 0 14px; image-rendering: pixelated;
+}
+#title-heroes canvas { animation: hero-bob 1.6s ease-in-out infinite; }
+#title-heroes canvas:nth-child(2n) { animation-delay: -0.8s; }
+#title-heroes canvas:nth-child(3n) { animation-delay: -0.4s; }
+@keyframes hero-bob { 50% { transform: translateY(-6px); } }
+.pick-card .pc-sprite { float: right; margin: -2px 0 2px 6px; image-rendering: pixelated; }
 .boot-status { margin-top: 22px; color: var(--dim); font-size: 12px; letter-spacing: 1px; }
 
 .btn {
@@ -159,7 +175,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   color: #fff; text-shadow: 0 1px 2px #000;
 }
 #hud-info { margin-left: auto; text-align: right; font-size: 12px; line-height: 1.45; }
-#hud-floor { color: var(--accent2); font-weight: 700; }
+#hud-floor { color: var(--accent2); font-weight: 700; font-family: 'Press Start 2P', monospace; font-size: 9px; padding-bottom: 2px; }
 #hud-gold { color: var(--gold); }
 #hud-hunger { color: var(--green); }
 #hud-net { font-size: 14px; margin-left: 4px; }
