@@ -1,0 +1,6 @@
+The sprite artwork in atlas.png comes from Dungeon Crawl Stone Soup (rltiles),
+https://github.com/crawl/crawl (crawl-ref/source/rltiles).
+
+Per rltiles/license.txt, these tiles derive from the public domain roguelike
+tileset "RLTiles" (http://rltiles.sf.net) with public-domain modifications by
+the Dungeon Crawl Stone Soup team and contributors. Thank you to all artists!

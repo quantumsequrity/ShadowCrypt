@@ -25,12 +25,24 @@ SC.view3d = (function () {
 
   function shade(hex, amt) { return SC.render.shadeColor(hex, amt); }
 
+  var texCache = { themeId: null, wall: null, wall2: null };
+  function texFor(themeId) {
+    if (texCache.themeId !== themeId) {
+      texCache.themeId = themeId;
+      var tt = SC.assets && SC.assets.isReady() && SC.assets.themeTiles(themeId);
+      texCache.wall = tt && tt.walls.length ? tt.walls[0] : null;
+      texCache.wall2 = tt && tt.walls.length > 1 ? tt.walls[1] : texCache.wall;
+    }
+    return texCache;
+  }
+
   function wallInfo(map, tile, pal) {
+    var tex = texFor((map.theme && map.theme.id) || 'dungeon');
     switch (tile) {
-      case T.WALL: return { color: pal.wall };
-      case T.PILLAR: return { color: shade(pal.wall, 18) };
-      case T.DOOR_CLOSED: return { color: '#7a5a3a', door: true };
-      case T.BOSS_GATE: return { color: '#5c1414', gate: true };
+      case T.WALL: return { color: pal.wall, texKey: tex.wall };
+      case T.PILLAR: return { color: shade(pal.wall, 18), texKey: tex.wall2 };
+      case T.DOOR_CLOSED: return { color: '#7a5a3a', door: true, texKey: SC.assets && SC.assets.isReady() ? SC.assets.tileKey('doorClosed') : null };
+      case T.BOSS_GATE: return { color: '#5c1414', gate: true, texKey: SC.assets && SC.assets.isReady() ? SC.assets.tileKey('bossGate') : null };
       default: return null;
     }
   }
@@ -109,6 +121,9 @@ SC.view3d = (function () {
     var focalH = (vh * 1.1);
     var flicker = 0.92 + 0.06 * Math.sin(t * 11) + 0.02 * Math.sin(t * 23);
     var maxDepth = 18;
+    var atlasImg = SC.assets && SC.assets.isReady() ? SC.assets.image() : null;
+    var prevSmoothWalls = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
 
     for (var col = 0; col < nCols; col++) {
       var relCol = (col * COL_W + COL_W / 2) / vw - 0.5;
@@ -139,34 +154,34 @@ SC.view3d = (function () {
       if (!hit) continue;
       var colH = focalH / perp;
       var y0 = horizon - colH / 2, y1 = horizon + colH / 2;
-      // wall u coordinate for cheap texture stripes
+      // wall u coordinate
       var wallX = side === 0 ? cy + dist * rdy : cx + dist * rdx;
       wallX -= Math.floor(wallX);
       var bright = U.clamp(1.35 - perp / 6.2, 0.05, 1.12) * flicker;
-      if (side === 1) bright *= 0.62;
-      var base = hit.color;
-      var stripe = (Math.floor(wallX * 5) % 2 === 0) ? 4 : -10;
-      var tone = Math.round((bright - 1) * 110) + stripe;
-      ctx.fillStyle = shade(base, tone);
-      ctx.fillRect(col * COL_W, y0, COL_W, colH);
-      // mortar seams: brick rows and column joints
-      ctx.fillStyle = 'rgba(0,0,0,' + (0.28 * bright).toFixed(2) + ')';
-      ctx.fillRect(col * COL_W, y0 + colH * 0.33, COL_W, Math.max(1, colH * 0.015));
-      ctx.fillRect(col * COL_W, y0 + colH * 0.66, COL_W, Math.max(1, colH * 0.015));
-      if (wallX < 0.05 || Math.abs(wallX - 0.5) < 0.025) {
+      if (side === 1) bright *= 0.72;
+      // TEXTURED column: sample a vertical strip from the real wall sprite
+      var texRect = hit.texKey && atlasImg ? SC.assets.rect(hit.texKey) : null;
+      if (texRect) {
+        var su = texRect[0] + Math.min(texRect[2] - 1, Math.floor(wallX * texRect[2]));
+        ctx.drawImage(atlasImg, su, texRect[1], 1, texRect[3], col * COL_W, y0, COL_W, colH);
+        var dark = U.clamp(1 - bright, 0, 0.94);
+        if (dark > 0.02) {
+          ctx.fillStyle = 'rgba(3,4,10,' + dark.toFixed(3) + ')';
+          ctx.fillRect(col * COL_W, y0, COL_W, colH);
+        }
+      } else {
+        var stripe = (Math.floor(wallX * 5) % 2 === 0) ? 4 : -10;
+        ctx.fillStyle = shade(hit.color, Math.round((bright - 1) * 110) + stripe);
         ctx.fillRect(col * COL_W, y0, COL_W, colH);
+        ctx.fillStyle = 'rgba(0,0,0,' + (0.28 * bright).toFixed(2) + ')';
+        ctx.fillRect(col * COL_W, y0 + colH * 0.33, COL_W, Math.max(1, colH * 0.015));
+        ctx.fillRect(col * COL_W, y0 + colH * 0.66, COL_W, Math.max(1, colH * 0.015));
       }
-      // subtle theme-accent glow strip near floor (torch light bounce)
-      ctx.fillStyle = 'rgba(255,190,110,' + (0.10 * bright).toFixed(3) + ')';
+      // torch light bounce near the floor
+      ctx.fillStyle = 'rgba(255,190,110,' + (0.08 * bright).toFixed(3) + ')';
       ctx.fillRect(col * COL_W, y0 + colH * 0.82, COL_W, colH * 0.1);
-      if (hit.door) {
-        ctx.fillStyle = 'rgba(0,0,0,' + (0.35 * bright) + ')';
-        if (wallX > 0.42 && wallX < 0.58) ctx.fillRect(col * COL_W, y0 + colH * 0.1, COL_W, colH * 0.8);
-        ctx.fillStyle = 'rgba(255,215,110,' + (0.5 * bright) + ')';
-        if (wallX > 0.6 && wallX < 0.66) ctx.fillRect(col * COL_W, y0 + colH * 0.48, COL_W, colH * 0.05);
-      }
       if (hit.gate) {
-        ctx.fillStyle = 'rgba(231,76,60,' + (0.5 * bright * (0.7 + 0.3 * Math.sin(t * 5))) + ')';
+        ctx.fillStyle = 'rgba(231,76,60,' + (0.4 * bright * (0.7 + 0.3 * Math.sin(t * 5))) + ')';
         if ((Math.floor(wallX * 8) % 2) === 0) ctx.fillRect(col * COL_W, y0 + colH * 0.2, COL_W, colH * 0.6);
       }
       // hard edge shading top/bottom
@@ -193,11 +208,12 @@ SC.view3d = (function () {
     function addSprite(wx, wy, img, scale, yOff, glow) {
       var dx = wx - cx, dy = wy - cy;
       var depth = dx * Math.cos(ang) + dy * Math.sin(ang);
-      if (depth < 0.15 || depth > maxDepth) return;
+      if (depth < 0.4 || depth > maxDepth) return;
       var lat = -dx * Math.sin(ang) + dy * Math.cos(ang);
       var focalW = (vw / 2) / Math.tan(FOV / 2);
       var sx = vw / 2 + (lat / depth) * focalW;
       var size = (focalH / depth) * (scale || 0.9);
+      size = Math.min(size, vh * 0.82); // never let a close-up sprite swallow the screen
       if (sx + size / 2 < 0 || sx - size / 2 > vw) return;
       sprites.push({ x: sx, depth: depth, size: size, img: img, yOff: yOff || 0, glow: glow });
     }
@@ -282,8 +298,8 @@ SC.view3d = (function () {
     st.projectiles.forEach(function (pr) {
       addSprite(pr.x, pr.y, SC.render.spriteGlyph('proj' + (pr.from === 'player' ? 'p' : 'm'), pr.from === 'player' ? '✦' : '✴️', 32), 0.18, 0.35);
     });
-    // player body in TPP
-    if (tpp) addSprite(px, py, SC.render.spriteHero(p.classId, frame), 0.66, 0);
+    // player body in TPP (paper-doll: shows equipped gear)
+    if (tpp) addSprite(px, py, SC.render.spriteHero(p.classId, frame, p), 0.66, 0);
 
     // depth sort far→near, draw with z-buffer slices (crisp pixel scaling — HD-2D look)
     ctx.imageSmoothingEnabled = false;
@@ -297,7 +313,7 @@ SC.view3d = (function () {
       if (sp.glow) {
         ctx.save();
         ctx.shadowColor = sp.glow;
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = Math.min(12, 4 + sp.depth * 2);
       }
       // draw in vertical slices, skipping columns hidden by nearer walls
       var slice = Math.max(2, COL_W);

@@ -167,9 +167,56 @@ SC.render = (function () {
   }
 
   function atlasFor(theme) {
-    var key = (theme.id || 'x') + ':' + TILE;
-    if (!atlases[key]) atlases[key] = buildAtlas(theme, TILE);
+    var spr = SC.assets && SC.assets.isReady();
+    var key = (theme.id || 'x') + ':' + TILE + (spr ? ':s' : '');
+    if (!atlases[key]) atlases[key] = spr ? buildSpriteAtlas(theme, TILE) : buildAtlas(theme, TILE);
     return atlases[key];
+  }
+
+  // Theme tile atlas built from the real sprite art
+  function buildSpriteAtlas(theme, size) {
+    var tt = SC.assets.themeTiles(theme.id) || { walls: [], floors: [] };
+    var a = { floors: [], water: [], lava: [] };
+    var i, c, g;
+    var floorKeys = tt.floors.length ? tt.floors : null;
+    for (i = 0; i < 4; i++) {
+      c = mkCanvas(size); g = c.getContext('2d');
+      if (floorKeys) {
+        SC.assets.drawRect(g, floorKeys[i % floorKeys.length], 0, 0, size, size);
+        g.fillStyle = 'rgba(0,0,0,0.12)';
+        g.fillRect(0, 0, size, size); // slight darkening for dungeon mood
+      } else {
+        g.fillStyle = (theme.palette || {}).floor || '#20242e';
+        g.fillRect(0, 0, size, size);
+      }
+      a.floors.push(c);
+    }
+    var wallKey = tt.walls.length ? tt.walls[0] : null;
+    var wallKey2 = tt.walls.length > 1 ? tt.walls[1 % tt.walls.length] : wallKey;
+    c = mkCanvas(size); g = c.getContext('2d');
+    if (wallKey) SC.assets.drawRect(g, wallKey, 0, 0, size, size);
+    else { g.fillStyle = (theme.palette || {}).wall || '#3a3f4d'; g.fillRect(0, 0, size, size); }
+    a.wallTop = c;
+    c = mkCanvas(size); g = c.getContext('2d');
+    if (wallKey2) SC.assets.drawRect(g, wallKey2, 0, 0, size, size);
+    g.fillStyle = 'rgba(0,0,0,0.42)';
+    g.fillRect(0, 0, size, size);
+    var grad = g.createLinearGradient(0, 0, 0, size);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.4)');
+    g.fillStyle = grad; g.fillRect(0, 0, size, size);
+    a.wallFront = c;
+    ['water', 'water2'].forEach(function (wk) {
+      c = mkCanvas(size); g = c.getContext('2d');
+      if (!SC.assets.drawRect(g, SC.assets.tileKey(wk), 0, 0, size, size)) { g.fillStyle = '#123a5e'; g.fillRect(0, 0, size, size); }
+      a.water.push(c);
+    });
+    ['lava', 'lava2'].forEach(function (lk) {
+      c = mkCanvas(size); g = c.getContext('2d');
+      if (!SC.assets.drawRect(g, SC.assets.tileKey(lk), 0, 0, size, size)) { g.fillStyle = '#7e1a06'; g.fillRect(0, 0, size, size); }
+      a.lava.push(c);
+    });
+    return a;
   }
 
   // ------------------------------------------------------------- lighting
@@ -337,14 +384,27 @@ SC.render = (function () {
     }
 
     // projectiles
+    var sprReady = SC.assets && SC.assets.isReady();
     for (var pi = 0; pi < st.projectiles.length; pi++) {
       var pr = st.projectiles[pi];
       var prx = pr.x * TILE - camX, pry = pr.y * TILE - camY;
-      ctx.fillStyle = pr.color || '#ffd35c';
-      ctx.beginPath(); ctx.arc(prx, pry, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 0.35;
-      ctx.beginPath(); ctx.arc(prx - pr.vx * 0.02 * TILE, pry - pr.vy * 0.02 * TILE, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
+      var drewSpr = false;
+      if (sprReady) {
+        if (pr.from === 'player' && pr.color === '#e8d9a0') {
+          // arrow: pick the 8-direction sprite matching flight angle
+          var aidx = ((Math.round(Math.atan2(pr.vy, pr.vx) / (Math.PI / 4)) % 8) + 8) % 8;
+          drewSpr = SC.assets.draw(ctx, SC.assets.effectKey('arrow' + aidx), prx, pry, TILE * 0.8);
+        } else {
+          drewSpr = SC.assets.draw(ctx, SC.assets.effectKey('bolt'), prx, pry, TILE * 0.55);
+        }
+      }
+      if (!drewSpr) {
+        ctx.fillStyle = pr.color || '#ffd35c';
+        ctx.beginPath(); ctx.arc(prx, pry, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath(); ctx.arc(prx - pr.vx * 0.02 * TILE, pry - pr.vy * 0.02 * TILE, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
     }
 
     // player
@@ -367,7 +427,69 @@ SC.render = (function () {
     drawMinimap(map, p, st.monsters);
   }
 
+  // features drawn from real sprite art over the floor tile
+  function drawFeatureSprite(atlas, tile, sx, sy, t, map, x, y) {
+    var A = SC.assets;
+    ctx.drawImage(atlas.floors[hashXY(x, y, map.floor) % 4], sx, sy);
+    var cx = sx + TILE / 2, cy = sy + TILE / 2;
+    switch (tile) {
+      case T.DOOR_CLOSED: A.draw(ctx, A.tileKey('doorClosed'), cx, cy, TILE); break;
+      case T.DOOR_OPEN: A.draw(ctx, A.tileKey('doorOpen'), cx, cy, TILE); break;
+      case T.STAIRS_DOWN:
+        A.draw(ctx, A.tileKey('stairsDown'), cx, cy, TILE);
+        ctx.fillStyle = 'rgba(241,196,15,' + (0.1 + 0.08 * Math.sin(t * 3)) + ')';
+        ctx.fillRect(sx + 2, sy + 2, TILE - 4, TILE - 4);
+        break;
+      case T.STAIRS_UP: A.draw(ctx, A.tileKey('stairsUp'), cx, cy, TILE); break;
+      case T.CHEST:
+        A.draw(ctx, A.tileKey('chest'), cx, cy, TILE * 0.92);
+        ctx.fillStyle = 'rgba(255,230,128,' + (0.12 + 0.1 * Math.sin(t * 4 + x)) + ')';
+        ctx.beginPath(); ctx.arc(cx, cy, TILE * 0.5, 0, Math.PI * 2); ctx.fill();
+        break;
+      case T.CHEST_OPEN: A.draw(ctx, A.tileKey('chestOpen'), cx, cy, TILE * 0.92, 0.8); break;
+      case T.SHRINE:
+        ctx.fillStyle = 'rgba(176,106,224,' + (0.2 + Math.sin(t * 4) * 0.12) + ')';
+        ctx.beginPath(); ctx.arc(cx, cy, TILE * 0.5, 0, Math.PI * 2); ctx.fill();
+        A.draw(ctx, A.tileKey('shrine'), cx, cy, TILE);
+        break;
+      case T.SHRINE_USED: A.draw(ctx, A.tileKey('shrineUsed'), cx, cy, TILE, 0.85); break;
+      case T.BOSS_GATE:
+        A.draw(ctx, A.tileKey('bossGate'), cx, cy, TILE);
+        ctx.globalAlpha = 0.35 + 0.25 * Math.sin(t * 5);
+        ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 2, sy + 2, TILE - 4, TILE - 4);
+        ctx.globalAlpha = 1;
+        break;
+      case T.PILLAR:
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.beginPath(); ctx.ellipse(cx, sy + TILE * 0.82, TILE * 0.3, TILE * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+        A.draw(ctx, A.tileKey('pillar'), cx, cy - TILE * 0.05, TILE);
+        break;
+      case T.TRAP:
+        if (map.trapRevealed[x + ',' + y]) A.draw(ctx, A.tileKey('trap'), cx, cy, TILE * 0.85);
+        break;
+    }
+  }
+
   function drawTile(atlas, pal, tile, sx, sy, t, map, x, y, liquidFrame) {
+    // real sprite art path
+    if (SC.assets && SC.assets.isReady() && atlas.wallTop) {
+      if (tile === T.WALL) {
+        var below2 = map.get(x, y + 1);
+        ctx.drawImage(below2 !== T.WALL && map.inb(x, y + 1) ? atlas.wallFront : atlas.wallTop, sx, sy);
+        return;
+      }
+      if (tile === T.WATER) { ctx.drawImage(atlas.water[liquidFrame], sx, sy); return; }
+      if (tile === T.LAVA) {
+        ctx.drawImage(atlas.lava[liquidFrame], sx, sy);
+        ctx.fillStyle = 'rgba(255,140,40,' + (0.1 + 0.08 * Math.sin(t * 3 + x * 2 + y)) + ')';
+        ctx.fillRect(sx, sy, TILE, TILE);
+        return;
+      }
+      if (tile !== T.FLOOR) { drawFeatureSprite(atlas, tile, sx, sy, t, map, x, y); return; }
+      ctx.drawImage(atlas.floors[hashXY(x, y, map.floor) % 4], sx, sy);
+      return;
+    }
     var below;
     switch (tile) {
       case T.WALL:
@@ -483,6 +605,21 @@ SC.render = (function () {
   }
 
   function drawBreakable(br, sx, sy, t) {
+    if (SC.assets && SC.assets.isReady()) {
+      var bkey = SC.assets.tileKey(br.kind);
+      if (bkey) {
+        var cx2 = sx + TILE / 2, cy2 = sy + TILE / 2;
+        if (br.kind === 'goldenChest') {
+          ctx.fillStyle = 'rgba(255,215,80,' + (0.14 + 0.1 * Math.sin(t * 3)) + ')';
+          ctx.beginPath(); ctx.arc(cx2, cy2, TILE * 0.5, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.beginPath(); ctx.ellipse(cx2, sy + TILE * 0.82, TILE * 0.28, TILE * 0.09, 0, 0, Math.PI * 2); ctx.fill();
+        SC.assets.draw(ctx, bkey, cx2, cy2, TILE * 0.85);
+        if (br.kind === 'goldenChest') label('🔒', cx2, sy + TILE * 0.22, '#ffd75e');
+        return;
+      }
+    }
     if (br.kind === 'urn') {
       ctx.fillStyle = '#8a6a4a';
       ctx.beginPath();
@@ -524,7 +661,56 @@ SC.render = (function () {
     warrior: '#ff8c3a', mage: '#5db9ff', rogue: '#b8c4d6',
     paladin: '#ffe066', ranger: '#5ee08a', necromancer: '#c37aff'
   };
+  // Paper-doll hero from real sprite layers: base body + boots + armor + gloves +
+  // helmet + shield + weapon — the sprite CHANGES with what you equip.
+  function drawHeroSprite(x, y, classId, t, p) {
+    var A = SC.assets;
+    var look = A.classLook(classId);
+    if (!look) return false;
+    var px = TILE * 1.18;
+    var now = Date.now();
+    var moving = p && p.fx !== undefined && (Math.abs(p.fx - p.x) > 0.02 || Math.abs(p.fy - p.y) > 0.02);
+    var bounce = moving ? Math.abs(Math.sin(t * 13)) * 3 : Math.sin(t * 2) * 1.2;
+    var dirX = p ? (p.dirX || 0) : 0;
+    var swinging = p && p.swingUntil && now < p.swingUntil;
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.beginPath(); ctx.ellipse(x, y + px * 0.36, px * 0.3, px * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(x, y - px * 0.12 - bounce);
+    if (dirX < 0) ctx.scale(-1, 1);
+    if (swinging) {
+      var prog = 1 - (p.swingUntil - now) / 170;
+      ctx.rotate(-0.18 + prog * 0.34);
+      ctx.translate(px * 0.08, 0);
+    }
+    var eq = p && p.equipment;
+    var layerOrder = [
+      look.base,
+      eq && eq.boots ? A.layerKey(eq.boots.id) : null,
+      (eq && eq.armor ? A.layerKey(eq.armor.id) : null) || look.body,
+      eq && eq.gloves ? A.layerKey(eq.gloves.id) : null,
+      (eq && eq.helmet ? A.layerKey(eq.helmet.id) : null) || look.head,
+      eq && eq.shield ? A.layerKey(eq.shield.id) : null,
+      (eq && eq.weapon ? A.layerKey(eq.weapon.id) : null) || look.hand1
+    ];
+    for (var li = 0; li < layerOrder.length; li++) {
+      if (layerOrder[li]) A.draw(ctx, layerOrder[li], 0, 0, px);
+    }
+    ctx.restore();
+    // swing trail
+    if (swinging) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 3;
+      var side = dirX >= 0 ? 1 : -1;
+      ctx.beginPath();
+      ctx.arc(x, y, px * 0.55, -0.6 * side, 0.9 * side, side < 0);
+      ctx.stroke();
+    }
+    return true;
+  }
+
   function drawHero(x, y, classId, t, p) {
+    if (SC.assets && SC.assets.isReady() && drawHeroSprite(x, y, classId, t, p)) return;
     var color = classColor(classId);
     var hair = HAIR_COLORS[classId] || '#d78aff';
     var r = TILE * 0.36;
@@ -700,6 +886,18 @@ SC.render = (function () {
 
   function drawMonster(m, x, y, t, size) {
     size = size || 1;
+    // real sprite art path
+    if (SC.assets && SC.assets.isReady()) {
+      var mkey = SC.assets.enemyKey(m.id);
+      if (mkey) {
+        var px = TILE * 1.06 * size;
+        var mbob = Math.sin(t * 3.2 + (m.x || 0) * 0.7) * 1.6;
+        ctx.fillStyle = 'rgba(0,0,0,0.42)';
+        ctx.beginPath(); ctx.ellipse(x, y + px * 0.36, px * 0.32, px * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+        SC.assets.draw(ctx, mkey, x, y - px * 0.1 + mbob, px);
+        return;
+      }
+    }
     var r = TILE * 0.33 * size;
     var color = m.color || '#c0c0c0';
     var wob = Math.sin(t * 3.2 + (m.x || 0) * 0.7) * r * 0.07;
@@ -984,6 +1182,22 @@ SC.render = (function () {
 
   // ------------------------------------------------------- item / ui bits
   function drawItemGlyph(g2, x, y, t) {
+    if (SC.assets && SC.assets.isReady()) {
+      var ikey = g2.gold ? SC.assets.tileKey('goldPile') : SC.assets.itemKey(g2.id);
+      if (ikey) {
+        var rc2 = rarityColor(g2.rarity);
+        if (g2.rarity && ['rare', 'epic', 'legendary', 'mythic'].indexOf(g2.rarity) >= 0) {
+          ctx.fillStyle = rc2;
+          ctx.globalAlpha = 0.2 + 0.12 * Math.sin(t * 4);
+          ctx.beginPath(); ctx.arc(x, y, TILE * 0.42, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath(); ctx.ellipse(x, y + TILE * 0.24, TILE * 0.22, TILE * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+        SC.assets.draw(ctx, ikey, x, y, TILE * 0.72);
+        return;
+      }
+    }
     var def = SC.entities.itemDef(g2.id) || {};
     var kindGlyphs = { potion: '!', scroll: '?', weapon: '/', shield: ')', armor: '[', helmet: '^', gloves: '{', boots: 'b', ring: 'o', amulet: '"', food: '%', special: '*', material: '◆' };
     var rc = rarityColor(g2.rarity);
@@ -1176,9 +1390,14 @@ SC.render = (function () {
       ctx.lineWidth = st.selectedBuilding === b ? 2 : 1;
       roundRectPath(bx + 2, by + 2, bs - 4, bs - 4, 8);
       ctx.stroke();
-      ctx.font = Math.round(bs * 0.44) + 'px serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(d2.icon, bx + bs / 2, by + bs / 2 - bs * 0.06);
+      var bspr = SC.assets && SC.assets.isReady() && SC.assets.buildingKey(b.type);
+      if (bspr) {
+        SC.assets.draw(ctx, bspr, bx + bs / 2, by + bs / 2 - bs * 0.04, bs * 0.72);
+      } else {
+        ctx.font = Math.round(bs * 0.44) + 'px serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(d2.icon, bx + bs / 2, by + bs / 2 - bs * 0.06);
+      }
       ctx.fillStyle = '#0b0e14';
       ctx.fillRect(bx + 4, by + 4, 22, 13);
       ctx.fillStyle = '#f1c40f';
@@ -1193,9 +1412,13 @@ SC.render = (function () {
       if (b.type === 'farmPlot' && b.crop) {
         var prog = SC.haven.cropProgress(b, now);
         var cd = SC.haven.cropDef(b.crop.id) || { icon: '🌱' };
-        ctx.font = Math.round(bs * (0.2 + prog * 0.22)) + 'px serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(prog >= 1 ? cd.icon : (prog > 0.5 ? '🌿' : '🌱'), bx + bs / 2, by + bs * 0.62);
+        var cspr = prog >= 1 && SC.assets && SC.assets.isReady() && SC.assets.cropKey(b.crop.id);
+        if (cspr) SC.assets.draw(ctx, cspr, bx + bs / 2, by + bs * 0.6, bs * 0.5);
+        else {
+          ctx.font = Math.round(bs * (0.2 + prog * 0.22)) + 'px serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(prog >= 1 ? cd.icon : (prog > 0.5 ? '🌿' : '🌱'), bx + bs / 2, by + bs * 0.62);
+        }
         ctx.strokeStyle = prog >= 1 ? '#2ecc71' : '#f1c40f';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -1244,7 +1467,7 @@ SC.render = (function () {
     // player hero on the field
     var p = st.player;
     var hx = ox + sg.hero.x * cell + cell / 2, hy = oy + sg.hero.y * cell + cell / 2;
-    drawHero(hx, hy, p.classId, t, { dirX: sg.hero.dirX, dirY: sg.hero.dirY, swingUntil: sg.hero.swingUntil, fx: sg.hero.x, fy: sg.hero.y, x: sg.hero.x, y: sg.hero.y });
+    drawHero(hx, hy, p.classId, t, { dirX: sg.hero.dirX, dirY: sg.hero.dirY, swingUntil: sg.hero.swingUntil, fx: sg.hero.x, fy: sg.hero.y, x: sg.hero.x, y: sg.hero.y, equipment: p.equipment });
 
     drawSparksAt(-ox, -oy, cell);
     drawFloatsAt(-ox, -oy, cell);
@@ -1392,16 +1615,26 @@ SC.render = (function () {
   }
 
   function spriteMonster(m, frame) {
-    var fam = m._fam || monsterFamily(m);
-    var key = 'm:' + fam + ':' + (m.color || '') + ':' + (m.boss ? 'b' : m.miniBoss ? 'mb' : '') + ':' + frame;
+    var useAtlas = SC.assets && SC.assets.isReady() && SC.assets.enemyKey(m.id);
+    var fam = m._fam || (m._fam = monsterFamily(m));
+    var key = 'm:' + (useAtlas ? m.id : fam + ':' + (m.color || '')) + ':' + (m.boss ? 'b' : m.miniBoss ? 'mb' : '') + ':' + frame;
     return bakeSprite(key, 144, function (g, s) {
-      drawMonster(m, s / 2, s / 2, frame * 0.9 + 0.3, m.boss ? 1.15 : 1);
+      if (useAtlas) SC.assets.draw(g, SC.assets.enemyKey(m.id), s / 2, s / 2 + (frame ? 2 : -2), s * 0.9);
+      else drawMonster(m, s / 2, s / 2, frame * 0.9 + 0.3, m.boss ? 1.15 : 1);
     });
   }
 
-  function spriteHero(classId, frame) {
-    return bakeSprite('h:' + classId + ':' + frame, 144, function (g, s) {
-      drawHero(s / 2, s / 2 + s * 0.08, classId, frame * 0.8 + 0.2, { dirX: 0, dirY: 1, x: 0, y: 0, fx: 0, fy: 0 });
+  function spriteHero(classId, frame, p) {
+    var eqSig = '';
+    if (p && p.equipment && SC.assets && SC.assets.isReady()) {
+      var eq = p.equipment;
+      eqSig = [eq.weapon, eq.shield, eq.helmet, eq.armor, eq.gloves, eq.boots]
+        .map(function (e) { return e ? e.id : '-'; }).join(',');
+    }
+    var readyTag = (SC.assets && SC.assets.isReady()) ? 'A:' : 'v:';
+    return bakeSprite('h:' + readyTag + classId + ':' + frame + ':' + eqSig, 144, function (g, s) {
+      drawHero(s / 2, s / 2 + s * 0.08, classId, frame * 0.8 + 0.2,
+        { dirX: 0, dirY: 1, x: 0, y: 0, fx: 0, fy: 0, equipment: p && p.equipment });
     });
   }
 

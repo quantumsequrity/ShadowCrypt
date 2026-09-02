@@ -4,6 +4,10 @@ ShadowCrypt is now a **cross-platform action MMORPG** that runs in any browser �
 
 ## ✨ What makes it special
 
+- **Professional game art** — 633 hand-crafted pixel-art sprites from the legendary open-source roguelike *Dungeon Crawl Stone Soup* (public domain, see `web/assets/LICENSE-art.txt`): every one of the 148 monsters, 199 items, themed wall/floor tilesets for all 8 dungeon regions, spell icons, effects. Packed into a single texture atlas for instant loading, cached offline.
+- **A paper-doll hero** — your character's sprite is composited live from equipment layers: equip a new sword, shield, helmet, armor, gloves or boots and you SEE it on your hero, in the HUD portrait, in top-down, and in third-person 3D.
+- **Textured 3D dungeon crawling** — the first-person and third-person modes render real wall textures per theme via column-sampled raycasting, with distance lighting, torch bounce and billboard sprite monsters.
+
 - **Three camera modes** — press **V** (or 🎥): classic **top-down**, cinematic **third-person** behind your hero, and full **first-person** with a weapon viewmodel and crosshair. In TPP/FPP, joystick-up walks forward and dragging the right side of the screen (or mouse-drag / Q & E) looks around — shooter-style controls.
 - **Anime cel-shaded art** — heroes with spiky class-colored hair and big expressive eyes, bold-outlined sprite monsters in 16 body families (slimes wobble, bats flap, ghosts wave, dragons beat their wings), all drawn procedurally — zero downloaded assets.
 - **Fully synthesized audio** — 35+ sound effects and adaptive generative music (dark ambient in the crypt, drums in the arena and sieges, a dread theme on boss floors), created live with WebAudio. No audio files.

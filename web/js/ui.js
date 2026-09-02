@@ -19,6 +19,41 @@ SC.ui = (function () {
     return KIND_ICONS[def.kind] || '✨';
   }
 
+  // Real sprite icon element for an item id (falls back to emoji span)
+  function itemIconEl(id, size) {
+    if (SC.assets && SC.assets.isReady()) {
+      var key = SC.assets.itemKey(id);
+      if (key) {
+        var c = SC.assets.iconCanvas(key, size || 30);
+        if (c) return c;
+      }
+    }
+    var span = document.createElement('span');
+    span.textContent = itemIcon(id);
+    span.style.fontSize = ((size || 30) * 0.8) + 'px';
+    return span;
+  }
+
+  function skillCategory(skillId) {
+    var id = skillId.toLowerCase();
+    if (/fire|meteor|hellfire|blast|flame/.test(id) && !/frost/.test(id)) return 'fire';
+    if (/frost|ice|blizzard/.test(id)) return 'ice';
+    if (/lightning|chain|thunder|storm/.test(id)) return 'bolt';
+    if (/heal|holy light|rejuven|miracle|redemption/.test(id) && !/smite|strike|wrath/.test(id)) return 'heal';
+    if (/smite|holy|judgment|exorcism|divine|crusader|wrath/.test(id)) return 'holy';
+    if (/shot|arrow|snipe|marks|rapidfire/.test(id)) return 'shot';
+    if (/raise|skeleton|summon|army|imp|demonic|pet|call/.test(id)) return 'summon';
+    if (/rage|berserk|frenzy|reckless/.test(id)) return 'rage';
+    if (/shield|fortify|bone armor|barrier/.test(id)) return 'shield';
+    if (/haste|swift|time/.test(id)) return 'haste';
+    if (/empower|bless|cry|rally|inner|enlighten/.test(id)) return 'buff';
+    if (/vanish|invis|meld|smoke/.test(id)) return 'invis';
+    if (/poison|venom/.test(id)) return 'poison';
+    if (/hex|curse|doom|weak/.test(id)) return 'curse';
+    if (/blood|exsanguinate|tap|soul|reap|coil|drain/.test(id)) return 'blood';
+    return 'strike';
+  }
+
   // ------------------------------------------------------------------ HUD
   var lastHudAt = 0;
   function updateHud(force) {
@@ -36,7 +71,24 @@ SC.ui = (function () {
     $('hud-gold').textContent = '💰 ' + U.fmt(p.gold);
     $('hud-hunger').textContent = '🍗 ' + Math.round(p.hunger) + '%';
     $('hud-hunger').style.color = p.hunger > 50 ? 'var(--green)' : (p.hunger > 25 ? 'var(--gold)' : 'var(--hp)');
-    $('hud-portrait').textContent = { warrior: '⚔️', mage: '🔮', rogue: '🗡️', paladin: '✝️', ranger: '🏹', necromancer: '💀' }[p.classId] || '🎭';
+    // paper-doll portrait: your actual hero with equipped gear
+    var portrait = $('hud-portrait');
+    if (SC.assets && SC.assets.isReady() && SC.render.spriteHero) {
+      var heroC = SC.render.spriteHero(p.classId, 0, p);
+      var eqSig = Object.keys(p.equipment).map(function (k) { var e = p.equipment[k]; return e ? e.id : '-'; }).join(',');
+      if (portrait._sig !== p.classId + eqSig) {
+        portrait._sig = p.classId + eqSig;
+        portrait.innerHTML = '';
+        var pc = document.createElement('canvas');
+        pc.width = 40; pc.height = 40;
+        var pg = pc.getContext('2d');
+        pg.imageSmoothingEnabled = false;
+        pg.drawImage(heroC, 0, 0, 40, 40);
+        portrait.appendChild(pc);
+      }
+    } else {
+      portrait.textContent = { warrior: '⚔️', mage: '🔮', rogue: '🗡️', paladin: '✝️', ranger: '🏹', necromancer: '💀' }[p.classId] || '🎭';
+    }
 
     // effects
     var fxHost = $('hud-effects');
@@ -76,7 +128,13 @@ SC.ui = (function () {
     if (!skillId) { btn.style.opacity = 0.3; btn.textContent = String(i + 1); return; }
     btn.style.opacity = 1;
     var info = SC.combat.skillInfo(skillId);
-    btn.textContent = skillEmoji(skillId);
+    var iconKey = SC.assets && SC.assets.isReady() && SC.assets.skillIconKey(skillCategory(skillId));
+    btn.textContent = '';
+    if (iconKey) {
+      var ic = SC.assets.iconCanvas(iconKey, 34);
+      if (ic) { ic.style.borderRadius = '50%'; btn.appendChild(ic); }
+      else btn.textContent = skillEmoji(skillId);
+    } else btn.textContent = skillEmoji(skillId);
     btn.title = info.name;
     var cost = document.createElement('span');
     cost.className = 'cost'; cost.textContent = info.cost;
@@ -218,8 +276,20 @@ SC.ui = (function () {
       var def = E.itemDef(stk.id) || E.lookup('materials', stk.id) || { name: stk.id, kind: 'special' };
       var slot = document.createElement('div');
       slot.className = 'inv-slot rar-' + (stk.rarity || 'common');
-      slot.innerHTML = '<div class="ico">' + itemIcon(stk.id) + '</div><div class="nm">' + U.esc(def.name) + '</div>' +
-        (stk.qty > 1 ? '<div class="qty">' + stk.qty + '</div>' : '');
+      var ico = document.createElement('div');
+      ico.className = 'ico';
+      ico.appendChild(itemIconEl(stk.id, 34));
+      slot.appendChild(ico);
+      var nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = def.name;
+      slot.appendChild(nm);
+      if (stk.qty > 1) {
+        var q = document.createElement('div');
+        q.className = 'qty';
+        q.textContent = stk.qty;
+        slot.appendChild(q);
+      }
       slot.onclick = function () { itemActions(idx, stk, def); };
       grid.appendChild(slot);
     });
@@ -283,8 +353,18 @@ SC.ui = (function () {
       row.className = 'equip-row';
       var it = p.equipment[s[0]];
       var def = it ? E.itemDef(it.id) : null;
-      row.innerHTML = '<span class="slot-name">' + s[1] + '</span>' +
-        '<span style="flex:1">' + (def ? (itemIcon(it.id) + ' ' + U.esc(def.name) + ' <span class="pill" style="color:' + SC.render.rarityColor(it.rarity) + '">' + (it.rarity || 'common') + '</span>') : '<span style="color:var(--dim)">— empty —</span>') + '</span>';
+      row.innerHTML = '<span class="slot-name">' + s[1] + '</span>';
+      var mid = document.createElement('span');
+      mid.style.cssText = 'flex:1;display:flex;align-items:center;gap:8px';
+      if (def) {
+        mid.appendChild(itemIconEl(it.id, 28));
+        var nm2 = document.createElement('span');
+        nm2.innerHTML = U.esc(def.name) + ' <span class="pill" style="color:' + SC.render.rarityColor(it.rarity) + '">' + (it.rarity || 'common') + '</span>';
+        mid.appendChild(nm2);
+      } else {
+        mid.innerHTML = '<span style="color:var(--dim)">— empty —</span>';
+      }
+      row.appendChild(mid);
       if (def) {
         var btn = document.createElement('button');
         btn.className = 'btn'; btn.style.padding = '4px 10px'; btn.textContent = 'Unequip';
@@ -501,8 +581,12 @@ SC.ui = (function () {
         var need = i2.count || i2.qty || 1;
         return '<span style="color:' + (have >= need ? 'var(--green)' : 'var(--hp)') + '">' + U.esc(d.name) + ' ' + have + '/' + need + '</span>';
       }).join(' · ');
-      card.innerHTML = '<div class="lc-title">' + itemIcon(r.result || '') + ' ' + U.esc(resultDef.name) + (r.station ? ' <span class="pill">' + r.station + '</span>' : '') + '</div>' +
+      card.innerHTML = '<div class="lc-title">' + U.esc(resultDef.name) + (r.station ? ' <span class="pill">' + r.station + '</span>' : '') + '</div>' +
         '<div class="lc-sub">' + ing + '</div>';
+      var ct2 = card.querySelector('.lc-title');
+      var cic = itemIconEl(r.result || r.resultId || r.output || '', 26);
+      cic.style.cssText = 'vertical-align:middle;margin-right:6px';
+      ct2.insertBefore(cic, ct2.firstChild);
       if (ok && stationOk) {
         var btn = document.createElement('button');
         btn.className = 'btn btn-primary'; btn.textContent = 'Craft';
@@ -801,9 +885,13 @@ SC.ui = (function () {
     stock.forEach(function (s2) {
       var card = document.createElement('div');
       card.className = 'list-card';
-      card.innerHTML = '<div class="lc-title">' + itemIcon(s2.id) + ' ' + U.esc(s2.name) + '</div>' +
+      card.innerHTML = '<div class="lc-title">' + U.esc(s2.name) + '</div>' +
         '<div class="lc-sub">' + U.esc(s2.def.description || '') + '</div>' +
         '<div class="lc-meta">💰 ' + s2.price + '</div>';
+      var st2 = card.querySelector('.lc-title');
+      var sic = itemIconEl(s2.id, 26);
+      sic.style.cssText = 'vertical-align:middle;margin-right:6px';
+      st2.insertBefore(sic, st2.firstChild);
       var btn = document.createElement('button');
       btn.className = 'btn btn-primary'; btn.textContent = 'Buy';
       btn.onclick = function () {
@@ -1014,6 +1102,11 @@ SC.ui = (function () {
       }
     });
     U.on('camera:changed', function () { updateHud(true); });
+    U.on('assets:ready', function () {
+      updateHud(true);
+      refreshPanel();
+      pushMsg('✨ High-definition art loaded.');
+    });
     U.on('game:won', function () {
       modal('👑 THE DEMON KING IS SLAIN!',
         'You have conquered all 30 floors of ShadowCrypt. The realm is free… for now.<br><br>+5000 gold, +10000 XP.<br>The crypt reshuffles for your next descent — try a deeper portal, a new class, or the arena!',

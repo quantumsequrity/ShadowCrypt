@@ -156,6 +156,7 @@ var SC = (typeof window !== 'undefined') ? (window.SC = window.SC || {}) : (glob
   }
 
   function init() {
+    SC.assets.load();
     SC.render.init($('game-canvas'));
     SC.audio.init();
     SC.input.init();
